@@ -1,0 +1,11 @@
+# Docker sends this folder to the builder before it starts. Leave out everything the
+# Dockerfile does not use, so the build starts quickly and nothing private is sent.
+.git
+.github
+docs
+frontend
+backend
+**/target
+**/h2
+**/node_modules
+*.md

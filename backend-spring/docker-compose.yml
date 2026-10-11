@@ -1,0 +1,55 @@
+# Databases for local development of the Spring Boot edition. Start only the one you need:
+#
+#   docker compose up -d postgres        PostgreSQL for running the app   (port 5432, data kept)
+#   docker compose up -d postgres-test   PostgreSQL for running the tests (port 5433, data NOT kept)
+#   docker compose up -d mysql           MySQL, for the study profile     (port 3306, data kept)
+#   docker compose down                  stop them (kept data stays in its volume)
+#
+# Run the app on PostgreSQL:
+#   java -jar target/brief-spring.jar --spring.profiles.active=postgres
+#
+# Run the tests on PostgreSQL (PowerShell):
+#   $env:BRIEF_TEST_DB_URL = "jdbc:postgresql://localhost:5433/brief_test"
+#   $env:BRIEF_TEST_DB_USER = "brief"
+#   $env:BRIEF_TEST_DB_PASSWORD = "brief"
+#   .\mvnw.cmd test
+# The tests delete every row before each case. They are given their own database for that reason.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: brief
+      POSTGRES_USER: brief
+      POSTGRES_PASSWORD: brief
+    ports:
+      - "5432:5432"
+    volumes:
+      - brief-postgres:/var/lib/postgresql/data
+
+  postgres-test:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: brief_test
+      POSTGRES_USER: brief
+      POSTGRES_PASSWORD: brief
+    ports:
+      - "5433:5432"
+    # Kept in memory: every "docker compose up" starts from an empty database.
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: brief
+      MYSQL_USER: brief
+      MYSQL_PASSWORD: brief
+      MYSQL_ROOT_PASSWORD: brief-root
+    ports:
+      - "3306:3306"
+    volumes:
+      - brief-mysql:/var/lib/mysql
+
+volumes:
+  brief-postgres:
+  brief-mysql:

@@ -1,0 +1,781 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Brief! API",
+    "version": "2.3.0",
+    "description": "Backend for **Brief!**, a message board where every post fits in 255 characters.\n\nThe same API is served by two editions of the backend: **Javalin + JDBC** (`backend/`) and **Spring Boot + Spring Security + Spring Data JPA** (`backend-spring/`).\n\n**How errors work:** error responses have an empty body. The status code carries the meaning.\n\n**How to try the protected endpoints here:**\n1. Run `POST /register` to create an account (or use one you already have).\n2. Run `POST /login`. In the response headers, copy the value of `x-auth-token`.\n3. Click **Authorize** at the top right, paste the token, and confirm.\n4. Now `POST`, `PATCH` and `DELETE` on `/messages` will work, as that account.\n\nThe app runs in *strict* mode by default: you can only post as yourself and only change your own posts. Set the environment variable `BRIEF_AUTH_MODE=compat` before starting to get the original training contract, where no token is needed.\n\n**New in 2.1 (Spring Boot edition only):** the login token is a signed JWT; `GET /messages` and `GET /accounts/{account_id}/messages` can be read a page at a time with `limit` and `before`; in strict mode new passwords must be strong and repeated failed logins answer `429`. The Javalin edition ignores the paging parameters and always returns the full list.\n\n**New in 2.2 (Spring Boot edition only):** mentions are stored in their own indexed table when a post is saved or edited, so `GET /accounts/{account_id}/mentions` is a look-up and no longer searches every post.\n\n**New in 2.3 (Spring Boot edition only):** `GET /accounts/{account_id}/mentions` can be read a page at a time with `limit` and `before`, like the other lists; a username is one name whatever its capitals, for registering and for signing in; in strict mode a new username must be 3 to 30 letters, digits, dots, dashes or underscores. The database schema is created by versioned Flyway migrations, and the application runs on PostgreSQL as well as H2."
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "This server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "accounts",
+      "description": "Register, sign in, and look up members"
+    },
+    {
+      "name": "messages",
+      "description": "Read, write, edit and delete posts"
+    },
+    {
+      "name": "operations",
+      "description": "Health check"
+    }
+  ],
+  "paths": {
+    "/register": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Create an account",
+        "operationId": "register",
+        "description": "Succeeds only if the username is allowed, the password meets the rule, and the username is not taken. The password is stored as a salted hash.\n\nUsername rule: not blank. In the Spring Boot edition in strict mode (since 2.3): 3 to 30 characters, each a letter a-z or A-Z, a digit, a dot, a dash or an underscore.\n\nSince 2.3 (Spring Boot edition) a username is one name whatever its capitals: if `Maya` exists, `maya` and `MAYA` are taken. The name is stored and shown as it was typed.\n\nPassword rule: at least 4 characters. In the Spring Boot edition in strict mode: at least 8 characters, with at least one letter and one digit, and not the same as the username. `GET /health` reports which rule applies.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Credentials"
+              },
+              "example": {
+                "username": "ambroise",
+                "password": "secret12"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new account, including its `account_id`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                },
+                "example": {
+                  "account_id": 2,
+                  "username": "ambroise",
+                  "password": "secret12"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input, a username or password that does not meet the rule, or a username that is already taken (in any capitals). Empty body."
+          }
+        }
+      }
+    },
+    "/login": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Sign in",
+        "operationId": "login",
+        "description": "Checks the username and password. Since 2.3 (Spring Boot edition) the username is matched whatever capitals are typed; the answer carries it as it was registered. The password is always exact. On success the response carries a login token in the `X-Auth-Token` header; send it back as `Authorization: Bearer <token>` on write requests.\n\nIn the Spring Boot edition the token is a JWT signed with HMAC-SHA256. Its payload holds the account id (`sub`), a token id (`jti`) and the issue and expiry times; it is readable by anyone and holds nothing secret.\n\nIn strict mode (Spring Boot edition), five wrong passwords for the same username from the same address lock that pair out for 15 minutes. Behind a hosting platform's proxy the address is read from the header named in `BRIEF_CLIENT_IP_HEADER` (since 2.3).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Credentials"
+              },
+              "example": {
+                "username": "ambroise",
+                "password": "secret12"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The account.",
+            "headers": {
+              "X-Auth-Token": {
+                "description": "Login token, valid for 12 hours or until logout.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                },
+                "example": {
+                  "account_id": 2,
+                  "username": "ambroise",
+                  "password": "secret12"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Username and password do not match. Empty body."
+          },
+          "429": {
+            "description": "Too many failed attempts for this username from this address (Spring Boot edition, strict mode). Empty body.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until a login may be tried again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/logout": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Sign out",
+        "operationId": "logout",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Ends the session for the token sent. Always answers 200, even if the token is already gone (idempotent).",
+        "responses": {
+          "200": {
+            "description": "Signed out. Empty body."
+          }
+        }
+      }
+    },
+    "/accounts": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "List all members",
+        "operationId": "listAccounts",
+        "description": "Id and username only. Passwords are never included.",
+        "responses": {
+          "200": {
+            "description": "All accounts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PublicAccount"
+                  }
+                },
+                "example": [
+                  {
+                    "account_id": 1,
+                    "username": "TestUser1"
+                  },
+                  {
+                    "account_id": 2,
+                    "username": "TestUser2"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Look up one member",
+        "operationId": "getAccount",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": 1
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The account's id and username.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicAccount"
+                },
+                "example": {
+                  "account_id": 1,
+                  "username": "TestUser1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The id is not a number. Empty body."
+          },
+          "404": {
+            "description": "No such account. Empty body."
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/messages": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "List one member's posts",
+        "operationId": "getMessagesByAccount",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": 1
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Spring Boot edition. How many posts to return, newest first. If `before` is given without `limit`, 20 are returned. Example: `10`."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Spring Boot edition. Return only posts with a smaller `message_id`. Pass the id of the last post of the previous page to get the next one."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "That member's messages. An empty list if there are none.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Message"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Has-More": {
+                "description": "Only when `limit` or `before` was sent: `true` if older posts exist beyond this page, otherwise `false`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true",
+                    "false"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The id is not a number, or a paging parameter is out of range. Empty body."
+          }
+        },
+        "description": "Pages the same way as `GET /messages` when `limit` and/or `before` is sent (Spring Boot edition)."
+      }
+    },
+    "/accounts/{account_id}/mentions": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "List posts that mention a member",
+        "operationId": "getMentions",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": 1
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Spring Boot edition, since 2.3. How many mentions to return, newest first. If `before` is given without `limit`, 20 are returned. Example: `20`."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Spring Boot edition, since 2.3. Return only mentions in posts with a smaller `message_id`. Pass the id of the last post of the previous page to get the next one."
+          }
+        ],
+        "description": "Posts written by other members that contain this member's username as a whole word, in any letter case, with or without a leading `@`. A member's own posts never count.\n\nWithout query parameters: every mention, oldest first.\n\nSpring Boot edition, since 2.3: with `limit` and/or `before`, one page, **newest first**, and an `X-Has-More` header, exactly like `GET /messages`. The web app reads 20 at a time. The Javalin edition ignores the parameters and returns the full list.\n\nSpring Boot edition, since 2.2: who a post mentions is worked out when the post is saved or edited and stored in a `mention` table, so this request is an indexed look-up. One consequence: a name typed before that member registered is not a mention. The Javalin edition searches every post at request time.",
+        "responses": {
+          "200": {
+            "description": "The mentioning messages: all of them oldest first, or one page newest first. An empty list if there are none.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Message"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Has-More": {
+                "description": "Only when `limit` or `before` was sent: `true` if older mentions exist beyond this page, otherwise `false`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true",
+                    "false"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The id is not a number, or a paging parameter is out of range. Empty body."
+          },
+          "404": {
+            "description": "No such account. Empty body."
+          }
+        }
+      }
+    },
+    "/messages": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "List all posts",
+        "operationId": "getAllMessages",
+        "responses": {
+          "200": {
+            "description": "The posts. An empty list if there are none.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Message"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Has-More": {
+                "description": "Only when `limit` or `before` was sent: `true` if older posts exist beyond this page, otherwise `false`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true",
+                    "false"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`limit` is not between 1 and 100, or `before` is not a positive number. Empty body."
+          }
+        },
+        "description": "Without parameters: every post, oldest first (the original contract).\n\nWith `limit` and/or `before` (Spring Boot edition): one page, **newest first**, and an `X-Has-More` response header. To walk the whole list, call with `limit`, then repeat with `before` set to the `message_id` of the last post you received, until `X-Has-More` is `false`.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Spring Boot edition. How many posts to return, newest first. If `before` is given without `limit`, 20 are returned. Example: `10`."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Spring Boot edition. Return only posts with a smaller `message_id`. Pass the id of the last post of the previous page to get the next one."
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Write a post",
+        "operationId": "createMessage",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "The text must not be blank and must be at most 255 characters, and `posted_by` must be a real account. In strict mode `posted_by` must be the signed-in account. If `time_posted_epoch` is 0 or missing, the server uses the current time.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewMessage"
+              },
+              "example": {
+                "posted_by": 2,
+                "message_text": "Hello from the API docs.",
+                "time_posted_epoch": 0
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The saved message, including its `message_id`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid text or unknown author. Empty body."
+          },
+          "401": {
+            "description": "Strict mode: missing, unknown or expired token. Empty body."
+          },
+          "403": {
+            "description": "Strict mode: `posted_by` is not the signed-in account. Empty body."
+          }
+        }
+      }
+    },
+    "/messages/{message_id}": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Get one post",
+        "operationId": "getMessageById",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": 1
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The message. **If there is no such message the status is still 200 and the body is empty.**",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The id is not a number. Empty body."
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Edit a post's text",
+        "operationId": "updateMessage",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": 1
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageText"
+              },
+              "example": {
+                "message_text": "Edited text."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The full updated message.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No such message, or the new text is blank or over 255 characters. Empty body."
+          },
+          "401": {
+            "description": "Strict mode: missing, unknown or expired token. Empty body."
+          },
+          "403": {
+            "description": "Strict mode: the message belongs to someone else. Empty body."
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Delete a post",
+        "operationId": "deleteMessage",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": 1
+          }
+        ],
+        "description": "Idempotent: deleting a message that is already gone is not an error.",
+        "responses": {
+          "200": {
+            "description": "The deleted message, or an empty body if it did not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Strict mode: missing, unknown or expired token. Empty body."
+          },
+          "403": {
+            "description": "Strict mode: the message belongs to someone else. Empty body."
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "operations"
+        ],
+        "summary": "Health check",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "The server is running.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "password_policy": {
+                      "type": "string",
+                      "enum": [
+                        "basic",
+                        "strong"
+                      ]
+                    }
+                  }
+                },
+                "example": {
+                  "status": "UP",
+                  "password_policy": "strong"
+                }
+              }
+            }
+          }
+        },
+        "description": "`password_policy` is sent by the Spring Boot edition: `strong` in strict mode, `basic` in compat mode. The Javalin edition sends only `status`."
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Paste the `x-auth-token` value from a successful `POST /login`.",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Credentials": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "password": {
+            "type": "string",
+            "minLength": 4,
+            "description": "At least 4 characters; in the Spring Boot edition in strict mode at least 8 with a letter and a digit."
+          }
+        }
+      },
+      "Account": {
+        "type": "object",
+        "description": "The contract echoes back the password the caller sent. It is never read back from the database, which only holds a hash.",
+        "properties": {
+          "account_id": {
+            "type": "integer"
+          },
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "PublicAccount": {
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "integer"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "message_id": {
+            "type": "integer"
+          },
+          "posted_by": {
+            "type": "integer",
+            "description": "account_id of the author"
+          },
+          "message_text": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "time_posted_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds since 1970-01-01 UTC"
+          }
+        },
+        "example": {
+          "message_id": 1,
+          "posted_by": 1,
+          "message_text": "Not really, I just want to come in and see who's up to chat!",
+          "time_posted_epoch": 1791021600
+        }
+      },
+      "NewMessage": {
+        "type": "object",
+        "required": [
+          "posted_by",
+          "message_text"
+        ],
+        "properties": {
+          "posted_by": {
+            "type": "integer"
+          },
+          "message_text": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "time_posted_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds since 1970-01-01 UTC. Send 0 to let the server fill it in."
+          }
+        }
+      },
+      "MessageText": {
+        "type": "object",
+        "required": [
+          "message_text"
+        ],
+        "properties": {
+          "message_text": {
+            "type": "string",
+            "maxLength": 255
+          }
+        }
+      }
+    }
+  }
+}

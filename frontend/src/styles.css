@@ -1,0 +1,840 @@
+/* Brief - design tokens
+   Cool mist neutrals with a single emerald accent. Interface text is set in a
+   grotesque; the posts themselves are set in a serif, because they are the thing
+   you came to read. */
+:root {
+  --bg: #edf1ef;
+  --surface: #ffffff;
+  --ink: #10201c;
+  --muted: #56675f;
+  --line: #d3dcd8;
+  --accent: #0a7a5e;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcefe8;
+  --warn: #a85f00;
+  --danger: #c02a33;
+
+  --ui: "Schibsted Grotesk Variable", "Segoe UI", system-ui, sans-serif;
+  --reading: "Source Serif 4 Variable", "Iowan Old Style", Georgia, serif;
+
+  --radius: 14px;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1614;
+    --surface: #16211e;
+    --ink: #e7efec;
+    --muted: #93a69f;
+    --line: #283833;
+    --accent: #45c99d;
+    --accent-ink: #062019;
+    --accent-soft: #17332b;
+    --warn: #e0a040;
+    --danger: #f2777d;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--ui);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+p,
+ol {
+  margin: 0;
+}
+
+ol {
+  padding: 0;
+  list-style: none;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------- layout ---------- */
+
+.shell {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 620px);
+  gap: 72px;
+  max-width: 1060px;
+  margin: 0 auto;
+  padding: 56px 32px 96px;
+}
+
+.rail {
+  position: sticky;
+  top: 56px;
+  align-self: start;
+}
+
+.main {
+  min-width: 0;
+}
+
+@media (max-width: 880px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 36px;
+    padding: 28px 16px 80px;
+  }
+  .rail {
+    position: static;
+  }
+}
+
+/* ---------- brand ---------- */
+
+.brand {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 6px;
+}
+
+.brand-name {
+  display: block;
+  font-family: var(--reading);
+  font-size: 4rem;
+  font-weight: 600;
+  line-height: 0.95;
+  letter-spacing: -0.035em;
+}
+
+.brand-line {
+  display: block;
+  margin-top: 10px;
+  font-family: var(--reading);
+  font-style: italic;
+  font-size: 1.375rem;
+  color: var(--accent);
+}
+
+.brand-about {
+  margin-top: 16px;
+  max-width: 30ch;
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+/* ---------- buttons ---------- */
+
+.btn {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 8px 18px;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  line-height: 1.3;
+  cursor: pointer;
+  background: none;
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.btn-primary:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+
+.btn-quiet {
+  border-color: var(--line);
+  color: var(--ink);
+  padding: 6px 14px;
+  font-weight: 500;
+}
+
+.btn-quiet:hover {
+  border-color: var(--muted);
+}
+
+.btn-block {
+  width: 100%;
+  padding: 11px 18px;
+  margin-top: 4px;
+}
+
+.link {
+  border: 0;
+  padding: 2px 0;
+  background: none;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+}
+
+.link:hover {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
+
+.link-danger,
+.link-danger:hover {
+  color: var(--danger);
+}
+
+/* ---------- account panel ---------- */
+
+.auth,
+.me {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 55%, transparent);
+}
+
+.segmented button {
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: none;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segmented button[aria-selected="true"] {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.auth-form {
+  display: grid;
+  gap: 6px;
+  margin-top: 18px;
+}
+
+.auth-form label {
+  margin-top: 8px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.auth-form input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.auth-form input:focus-visible {
+  outline-offset: 0;
+  border-color: var(--accent);
+}
+
+.field-note {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+/* The line under a field can report on what was typed. The words carry the meaning; the colour only supports them. */
+.field-note[data-tone="good"] {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.field-note[data-tone="bad"] {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* A field with a small button inside its right edge (Show / Hide). */
+.field {
+  position: relative;
+}
+
+.field-with-toggle input {
+  padding-right: 68px;
+}
+
+.field-toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 7px;
+  padding: 5px 9px;
+  background: none;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.field-toggle:hover,
+.field-toggle[aria-pressed="true"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.auth-after {
+  margin-top: 4px;
+  text-align: center;
+}
+
+/* A tick box with its text beside it ("Stay signed in"). The general label and input rules of the
+   form are written for stacked text fields, so the ones that do not fit a tick box are undone here. */
+.auth-form label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.auth-form label.check input {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.form-error {
+  margin: 6px 0;
+  font-size: 0.875rem;
+  color: var(--danger);
+}
+
+.me-label {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.me-name {
+  font-family: var(--reading);
+  font-size: 1.625rem;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.me-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.badge {
+  display: inline-block;
+  min-width: 20px;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 28px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.rail-links {
+  margin-top: 10px;
+  font-size: 0.8125rem;
+}
+
+.rail-links a {
+  color: var(--muted);
+  text-underline-offset: 3px;
+}
+
+.rail-links a:hover {
+  color: var(--accent);
+}
+
+/* "Install Brief! on this device", shown only where the browser can do it. */
+.install {
+  margin-top: 6px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.install .link {
+  font-size: inherit;
+  text-decoration-color: currentColor; /* underlined like "API docs" above it, so it reads as something to press */
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.status[data-state="offline"] .status-dot {
+  background: var(--danger);
+}
+
+.status[data-state="loading"] .status-dot {
+  background: var(--muted);
+}
+
+/* ---------- main column ---------- */
+
+.main-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  min-height: 61px; /* lines the heading up with the wordmark */
+  padding-top: 14px;
+}
+
+.main-head h1 {
+  font-size: 1.375rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.main-head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.signin-nudge {
+  margin-top: 16px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.alerts {
+  margin-top: 14px;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.alerts .link {
+  color: var(--accent);
+  font-size: inherit;
+}
+
+/* ---------- composer ---------- */
+
+.composer {
+  margin-top: 16px;
+  padding: 18px 20px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.composer:focus-within {
+  border-color: var(--accent);
+}
+
+.composer-text {
+  display: block;
+  width: 100%;
+  min-height: 84px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  resize: vertical;
+  background: transparent;
+  font-family: var(--reading);
+  font-size: 1.1875rem;
+  line-height: 1.5;
+}
+
+.composer-text::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.composer-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.count {
+  margin-right: auto;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.count[data-over="true"] {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.hint {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+@media (max-width: 520px) {
+  .hint {
+    display: none;
+  }
+}
+
+/* ---------- the ruler (the 255-character limit, drawn) ---------- */
+
+.ruler {
+  --mark: var(--accent);
+  margin-top: 10px;
+}
+
+.ruler[data-state="near"] {
+  --mark: var(--warn);
+}
+
+.ruler[data-state="over"] {
+  --mark: var(--danger);
+}
+
+.ruler-strip {
+  position: relative;
+  height: 14px;
+  border-bottom: 1px solid var(--muted);
+}
+
+/* 51 minor ticks: one every 5 characters */
+.ruler-ticks {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 5px;
+  background-image: linear-gradient(to right, var(--muted) 1px, transparent 1px);
+  background-size: calc(100% / 51) 100%;
+  opacity: 0.55;
+}
+
+.ruler-major {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 10px;
+  background: var(--muted);
+}
+
+.ruler-major:last-of-type {
+  transform: translateX(-1px);
+}
+
+.ruler-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--mark) 22%, transparent);
+  border-right: 2px solid var(--mark);
+  transition: width 120ms ease-out, background-color 160ms, border-color 160ms;
+}
+
+.ruler-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3px;
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+/* ---------- feed ---------- */
+
+.feed {
+  margin-top: 8px;
+}
+
+.feed-more {
+  display: flex;
+  justify-content: center;
+  padding: 20px 0 4px;
+}
+
+.post {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 14px;
+  padding: 22px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.post[data-new="true"] {
+  animation: arrive 1.4s ease-out;
+}
+
+@keyframes arrive {
+  from {
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 12px var(--accent-soft);
+  }
+  to {
+    background: transparent;
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: hsl(var(--hue) 45% 88%);
+  color: hsl(var(--hue) 55% 24%);
+  font-weight: 700;
+}
+
+@media (prefers-color-scheme: dark) {
+  .avatar {
+    background: hsl(var(--hue) 30% 24%);
+    color: hsl(var(--hue) 60% 84%);
+  }
+}
+
+.post-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.author {
+  border: 0;
+  padding: 0;
+  background: none;
+  font-weight: 650;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.author:hover {
+  color: var(--accent);
+}
+
+.post-head time {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.post-text {
+  margin-top: 4px;
+  font-family: var(--reading);
+  font-size: 1.1875rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A web address inside a post. Only the address is clickable. */
+.post-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+
+.post-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+/* A member's name inside a post. Opens that member's posts. */
+.mention {
+  border: 0;
+  padding: 0 2px;
+  margin: 0 -2px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mention:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* A post that names you gets a quiet marker down its left edge. */
+.post[data-mention="true"] {
+  box-shadow: -14px 0 0 -11px var(--accent);
+}
+
+.post-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.used {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.used-bar {
+  display: block;
+  width: 85px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.used-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.post-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.confirm-text {
+  font-size: 0.875rem;
+}
+
+.post-edit {
+  margin-top: 8px;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/* ---------- empty, loading, offline ---------- */
+
+.notice {
+  margin-top: 40px;
+  color: var(--muted);
+}
+
+.notice-title {
+  font-family: var(--reading);
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.notice .btn {
+  margin-top: 16px;
+}
+
+.quiet {
+  margin-top: 40px;
+  color: var(--muted);
+}
+
+/* ---------- toast ---------- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  opacity: 0;
+  transform: translate(-50%, 8px);
+  pointer-events: none;
+  transition: opacity 160ms, transform 160ms;
+}
+
+.toast[data-show="true"] {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

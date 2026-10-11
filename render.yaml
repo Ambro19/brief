@@ -1,0 +1,45 @@
+# Render Blueprint: describes the whole deployment, so it is created the same way every time.
+#
+# In the Render dashboard: New > Blueprint, choose this repository. Render reads this file and
+# creates one web service (built from the Dockerfile) and one PostgreSQL database, connected.
+# Later changes to this file are applied when you push them.
+#
+# Field names follow https://render.com/docs/blueprint-spec (checked October 9, 2026).
+
+services:
+  - type: web
+    name: brief
+    runtime: docker                 # build the image from the Dockerfile in this repository
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free                      # to try it. Sleeps after 15 idle minutes. Paid: 0.5c-512mb ($7 a month)
+    region: virginia                # cannot be changed later. Keep the database in the same region
+    healthCheckPath: /health        # Render calls this to know the application is up
+    autoDeployTrigger: commit       # every push to the linked branch deploys
+    envVars:
+      # Login tokens and ownership rules on. This is also the default; stated here so it is visible.
+      - key: BRIEF_AUTH_MODE
+        value: strict
+      # The key that signs login tokens. Render makes a random one, once, and keeps it:
+      # 256 random bits, written as 44 characters. It never appears in this repository.
+      - key: BRIEF_JWT_SECRET
+        generateValue: true
+      # Requests reach the application through Render's proxy, so the connection's address is
+      # the proxy's. This header carries the visitor's own address (see security/ClientAddress.java).
+      - key: BRIEF_CLIENT_IP_HEADER
+        value: CF-Connecting-IP
+      # The database, as one connection string on Render's private network. The application
+      # turns it into the JDBC settings it needs when it starts (config/DatabaseUrl.java).
+      - key: DATABASE_URL
+        fromDatabase:
+          name: brief-db
+          property: connectionString
+
+databases:
+  - name: brief-db
+    databaseName: brief
+    user: brief
+    plan: free                      # to try it. EXPIRES 30 days after creation. Paid: 0.1c-256mb ($6 a month)
+    region: virginia
+    postgresMajorVersion: "16"      # the version the migrations were tested on
+    ipAllowList: []                 # reachable from Render's private network only, not from the internet

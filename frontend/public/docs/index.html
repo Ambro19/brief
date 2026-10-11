@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Brief! API - Swagger UI</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230A7A5E'/%3E%3Crect x='7' y='14' width='18' height='4' rx='2' fill='white'/%3E%3C/svg%3E" />
+    <!-- Swagger UI is served from this folder (no CDN), so the docs work offline.
+         Swagger UI is Apache-2.0 licensed; see SWAGGER-UI-LICENSE.txt. -->
+    <link rel="stylesheet" href="./swagger-ui.css" />
+    <style>
+      body { margin: 0; background: #fff; }
+      .back { display: block; padding: 10px 20px; font: 14px/1.4 system-ui, sans-serif; color: #0a7a5e; }
+    </style>
+  </head>
+  <body>
+    <a class="back" href="/">&larr; Back to Brief!</a>
+    <div id="swagger-ui"></div>
+    <script src="./swagger-ui-bundle.js"></script>
+    <script>
+      // The API description lives in openapi.json, next to this page.
+      // It is written by hand: when an endpoint changes, update that file too.
+      window.ui = SwaggerUIBundle({
+        url: "./openapi.json",
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        tryItOutEnabled: true,
+        persistAuthorization: true,
+      });
+    </script>
+  </body>
+</html>

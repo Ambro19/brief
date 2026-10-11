@@ -1,0 +1,16 @@
+{
+  "name": "Brief!",
+  "short_name": "Brief!",
+  "description": "A board where every post fits in 255 characters, so every post gets read.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#edf1ef",
+  "theme_color": "#0a7a5e",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

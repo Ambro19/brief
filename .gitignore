@@ -1,0 +1,17 @@
+# Java
+backend/target/
+backend/h2/
+backend-spring/target/
+backend-spring/h2/
+*.class
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+h2/
