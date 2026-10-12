@@ -1,17 +1,19 @@
 # Java
-backend/target/
-backend/h2/
-backend-spring/target/
-backend-spring/h2/
+target/
 *.class
 
+# The local H2 database: wherever the application was started from, it makes a folder named h2
+# there. It holds accounts and password hashes, so it is never committed. (2.3 listed only the
+# two folders inside the backends; a database made by starting from the top folder slipped through.)
+h2/
+*.mv.db
+*.trace.db
+
 # Node
-frontend/node_modules/
-frontend/dist/
+node_modules/
+frontend-spring/dist/
 
 # Editors / OS
 .vscode/
 .idea/
 .DS_Store
-
-h2/

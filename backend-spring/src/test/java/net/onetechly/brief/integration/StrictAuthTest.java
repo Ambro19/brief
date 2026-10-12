@@ -16,7 +16,12 @@ import static org.junit.jupiter.api.Assertions.*;
  * Strict mode: writing needs a login token, and members can only act as themselves.
  * Reading stays public. The first eight cases are the same as the Javalin edition's
  * StrictAuthTest; the rest cover what 2.1 added (JWT, the strong password rule, the login
- * rate limit) and what 2.3 added (the username rule, and the visitor's address behind a proxy).
+ * rate limit), what 2.3 added (the username rule, and the visitor's address behind a proxy),
+ * and what 2.4 added (email on accounts, the confirmation link, the forgotten password).
+ *
+ * Since 2.4 a new account needs an email address in this mode, and can post only once the
+ * address is confirmed. The helpers register(...) and registerConfirmed(...) take care of that
+ * for the tests that are about something else.
  *
  * brief.client-ip.header is set, as it is on a deployment: the application reads the visitor's
  * address from that header when a request carries it. Requests without the header are counted
@@ -26,6 +31,10 @@ import static org.junit.jupiter.api.Assertions.*;
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 "brief.auth.mode=strict",
+                // Stated here so that a variable set on the machine that runs the tests can never
+                // close the board under them, or make them send real mail.
+                "brief.invite-code=",
+                "brief.mail.resend-api-key=",
                 "brief.client-ip.header=" + StrictAuthTest.PROXY_HEADER,
                 "spring.datasource.url=${BRIEF_TEST_DB_URL:jdbc:h2:mem:brief-strict;DB_CLOSE_DELAY=-1}",
                 "spring.datasource.username=${BRIEF_TEST_DB_USER:sa}",
@@ -35,16 +44,14 @@ class StrictAuthTest extends ApiTestBase {
     /** The header a proxy in front of the application would put the visitor's address in. */
     static final String PROXY_HEADER = "X-Test-Client-Ip";
 
-    private String loginToken(String username, String password) throws Exception {
-        HttpResponse<String> response = send("POST", "/login", accountJson(username, password), null);
-        assertEquals(200, response.statusCode());
-        return response.headers().firstValue(AccountController.TOKEN_HEADER).orElseThrow();
+    /** Registers a second member (account id 2) with a confirmed email address, and returns their token. */
+    private String registerSecondUser() throws Exception {
+        return registerConfirmed("second", "secret12");
     }
 
-    /** Registers a second member (account id 2) and returns their token. */
-    private String registerSecondUser() throws Exception {
-        assertEquals(200, send("POST", "/register", accountJson("second", "secret12"), null).statusCode());
-        return loginToken("second", "secret12");
+    /** POST /register with a valid email address, so that what the test varies is the only thing that can be wrong. */
+    private HttpResponse<String> register(String username, String password) throws Exception {
+        return send("POST", "/register", registrationJson(username, password, "someone@example.test"), null);
     }
 
     @Test
@@ -173,12 +180,12 @@ class StrictAuthTest extends ApiTestBase {
 
     @Test
     void registrationNeedsAStrongPassword() throws Exception {
-        assertEquals(400, send("POST", "/register", accountJson("newbie", "password"), null).statusCode());  // no digit
-        assertEquals(400, send("POST", "/register", accountJson("newbie", "12345678"), null).statusCode());  // no letter
-        assertEquals(400, send("POST", "/register", accountJson("newbie", "abc1234"), null).statusCode());   // 7 characters
-        assertEquals(400, send("POST", "/register", accountJson("newbie12", "newbie12"), null).statusCode()); // same as the username
+        assertEquals(400, register("newbie", "password").statusCode());  // no digit
+        assertEquals(400, register("newbie", "12345678").statusCode());  // no letter
+        assertEquals(400, register("newbie", "abc1234").statusCode());   // 7 characters
+        assertEquals(400, register("newbie12", "newbie12").statusCode()); // same as the username
 
-        HttpResponse<String> accepted = send("POST", "/register", accountJson("newbie", "secret12"), null);
+        HttpResponse<String> accepted = register("newbie", "secret12");
         assertEquals(200, accepted.statusCode());
         assertAccount(accepted.body(), 2, "newbie", "secret12");
     }
@@ -228,12 +235,12 @@ class StrictAuthTest extends ApiTestBase {
 
     @Test
     void registrationNeedsAUsernameMadeOfPlainLettersDigitsDotsDashesOrUnderscores() throws Exception {
-        assertEquals(400, send("POST", "/register", accountJson("ab", "secret12"), null).statusCode());            // too short
-        assertEquals(400, send("POST", "/register", accountJson("two words", "secret12"), null).statusCode());     // a space
-        assertEquals(400, send("POST", "/register", accountJson("maya#2", "secret12"), null).statusCode());        // a symbol
-        assertEquals(400, send("POST", "/register", accountJson("a".repeat(31), "secret12"), null).statusCode());  // too long
+        assertEquals(400, register("ab", "secret12").statusCode());            // too short
+        assertEquals(400, register("two words", "secret12").statusCode());     // a space
+        assertEquals(400, register("maya#2", "secret12").statusCode());        // a symbol
+        assertEquals(400, register("a".repeat(31), "secret12").statusCode());  // too long
 
-        HttpResponse<String> accepted = send("POST", "/register", accountJson("Nora.Lane-7_x", "secret12"), null);
+        HttpResponse<String> accepted = register("Nora.Lane-7_x", "secret12");
         assertEquals(200, accepted.statusCode());
         assertAccount(accepted.body(), 2, "Nora.Lane-7_x", "secret12");
         assertEquals(2, mapper.readTree(get("/accounts").body()).size(), "only the valid name was registered");
@@ -242,7 +249,7 @@ class StrictAuthTest extends ApiTestBase {
     @Test
     void capitalsDoNotMatterForRegisteringSigningInOrTheLockOut() throws Exception {
         registerSecondUser();
-        assertEquals(400, send("POST", "/register", accountJson("SECOND", "secret12"), null).statusCode(), "already taken");
+        assertEquals(400, register("SECOND", "secret12").statusCode(), "already taken");
         assertNotNull(loginToken("Second", "secret12"));
 
         // Wrong passwords typed with different capitals all count against the same name.
@@ -292,5 +299,241 @@ class StrictAuthTest extends ApiTestBase {
         // All five fell back to the address of the connection, so together they reached the limit.
         assertEquals(429, loginFrom("made-up-6", "testuser1", "password").statusCode());
         assertEquals(429, send("POST", "/login", accountJson("testuser1", "password"), null).statusCode());
+    }
+
+    // ---- email on accounts (2.4) ----
+
+    @Test
+    void healthTellsTheWebAppThatAnEmailIsRequiredAndTheBoardIsOpen() throws Exception {
+        JsonNode health = mapper.readTree(get("/health").body());
+        assertEquals("required", health.get("email").asText());
+        assertEquals("open", health.get("board").asText());
+    }
+
+    @Test
+    void aNewAccountNeedsAnEmailAddress() throws Exception {
+        assertEquals(400, send("POST", "/register", accountJson("newbie", "secret12"), null).statusCode(), "no address");
+        assertEquals(400, send("POST", "/register", registrationJson("newbie", "secret12", "  "), null).statusCode(), "blank");
+        for (String notAnAddress : new String[] {"newbie", "newbie@", "@example.test", "newbie@example", "a b@example.test",
+                "newbie@@example.test", "newbie@example..test", "newbie@.test", "<newbie@example.test>"}) {
+            assertEquals(400, send("POST", "/register", registrationJson("newbie", "secret12", notAnAddress), null).statusCode(),
+                    notAnAddress);
+        }
+        assertEquals(1, mapper.readTree(get("/accounts").body()).size(), "none of those created an account");
+
+        HttpResponse<String> accepted = send("POST", "/register", registrationJson("newbie", "secret12", "Newbie@Example.Test"), null);
+        assertEquals(200, accepted.statusCode());
+        assertAccount(accepted.body(), 2, "newbie", "secret12");
+        assertFalse(accepted.body().toLowerCase().contains("example.test"), "the answer to register does not echo the address");
+    }
+
+    @Test
+    void oneAddressOneAccountWhateverTheCapitals() throws Exception {
+        assertEquals(200, send("POST", "/register", registrationJson("first", "secret12", "shared@example.test"), null).statusCode());
+        assertEquals(400, send("POST", "/register", registrationJson("other", "secret12", "shared@example.test"), null).statusCode());
+        assertEquals(400, send("POST", "/register", registrationJson("other", "secret12", " SHARED@Example.Test "), null).statusCode());
+        assertEquals(200, send("POST", "/register", registrationJson("other", "secret12", "other@example.test"), null).statusCode());
+    }
+
+    @Test
+    void theAddressIsNeverShownToOthers() throws Exception {
+        registerSecondUser();
+        for (String path : new String[] {"/accounts", "/accounts/2", "/messages", "/accounts/2/messages"}) {
+            assertFalse(get(path).body().contains("example.test"), path + " must not show an email address");
+        }
+    }
+
+    @Test
+    void untilTheAddressIsConfirmedAMemberCanReadButNotPost() throws Exception {
+        assertEquals(200, send("POST", "/register", registrationJson("newbie", "secret12", "newbie@example.test"), null).statusCode());
+        String token = loginToken("newbie", "secret12");
+
+        JsonNode me = mapper.readTree(send("GET", "/me", null, token).body());
+        assertEquals("newbie@example.test", me.get("email").asText());
+        assertFalse(me.get("email_verified").asBoolean());
+        assertFalse(me.get("can_post").asBoolean());
+
+        assertEquals(200, send("GET", "/messages", null, token).statusCode(), "reading works");
+        assertEquals(403, send("POST", "/messages", messageJson(2, "too early", 1L), token).statusCode());
+        assertEquals(1, mapper.readTree(get("/messages").body()).size(), "nothing was posted");
+
+        confirmEmail("newbie@example.test");
+
+        me = mapper.readTree(send("GET", "/me", null, token).body());
+        assertTrue(me.get("email_verified").asBoolean());
+        assertTrue(me.get("can_post").asBoolean());
+        assertEquals(200, send("POST", "/messages", messageJson(2, "now I can", 1L), token).statusCode(),
+                "the same login token works: confirming does not need a new sign-in");
+        assertEquals(200, send("PATCH", "/messages/2", textJson("and edit"), token).statusCode());
+    }
+
+    @Test
+    void theConfirmationLinkWorksOnceAndOnlyTheNewestOneWorks() throws Exception {
+        assertEquals(200, send("POST", "/register", registrationJson("newbie", "secret12", "newbie@example.test"), null).statusCode());
+        String first = secretMailedTo("newbie@example.test", "verify");
+        assertEquals(43, first.length(), "32 random bytes, written as 43 characters");
+
+        assertEquals(400, send("POST", "/email/verify", tokenJson("not-a-real-secret"), null).statusCode());
+        assertEquals(400, send("POST", "/email/verify", tokenJson(first + "x"), null).statusCode());
+        assertEquals(400, send("POST", "/email/verify", "{}", null).statusCode(), "no secret at all");
+        assertEquals(400, send("POST", "/password/reset", "{\"token\":\"" + first + "\",\"password\":\"another12\"}", null).statusCode(),
+                "a confirmation link cannot be used to set a password");
+
+        assertEquals(200, send("POST", "/email/verify", tokenJson(first), null).statusCode());
+        assertEquals(400, send("POST", "/email/verify", tokenJson(first), null).statusCode(), "a link works once");
+    }
+
+    @Test
+    void aMemberCanCorrectAnUnconfirmedAddressAndAskForTheMailAgain() throws Exception {
+        assertEquals(200, send("POST", "/register", registrationJson("newbie", "secret12", "typo@example.test"), null).statusCode());
+        String token = loginToken("newbie", "secret12");
+        String oldSecret = secretMailedTo("typo@example.test", "verify");
+
+        // asking again within a minute is refused, with the time to wait
+        HttpResponse<String> tooSoon = send("POST", "/email/verification", null, token);
+        assertEquals(429, tooSoon.statusCode());
+        long wait = Long.parseLong(tooSoon.headers().firstValue("Retry-After").orElseThrow());
+        assertTrue(wait > 0 && wait <= 60, "Retry-After was " + wait);
+
+        // correcting the address sends a new link to the new address and ends the old link
+        HttpResponse<String> corrected = send("POST", "/accounts/2/email", emailJson("right@example.test"), token);
+        assertEquals(200, corrected.statusCode());
+        assertEquals("right@example.test", mapper.readTree(corrected.body()).get("email").asText());
+        assertEquals(400, send("POST", "/email/verify", tokenJson(oldSecret), null).statusCode(), "the link to the wrong address is dead");
+        confirmEmail("right@example.test");
+
+        // once confirmed, there is nothing left to resend, and the address cannot be changed in 2.4
+        assertEquals(400, send("POST", "/email/verification", null, token).statusCode());
+        assertEquals(400, send("POST", "/accounts/2/email", emailJson("third@example.test"), token).statusCode());
+    }
+
+    @Test
+    void anAccountFromBefore24KeepsPostingAndCanAddAnAddress() throws Exception {
+        String token = loginToken("testuser1", "password"); // the seed account has no address
+        JsonNode me = mapper.readTree(send("GET", "/me", null, token).body());
+        assertTrue(me.get("email").isNull());
+        assertFalse(me.get("email_verified").asBoolean());
+        assertTrue(me.get("can_post").asBoolean(), "an account without an address is not waiting for anything");
+        assertEquals(200, send("POST", "/messages", messageJson(1, "as before", 1L), token).statusCode());
+        assertEquals(400, send("POST", "/email/verification", null, token).statusCode(), "there is nothing to confirm");
+
+        assertEquals(400, send("POST", "/accounts/1/email", emailJson("not an address"), token).statusCode());
+        assertEquals(200, send("POST", "/accounts/1/email", emailJson("Old.Member@example.test"), token).statusCode());
+        assertEquals(403, send("POST", "/messages", messageJson(1, "address given, not confirmed", 1L), token).statusCode());
+        // Editing is writing too: the member's own earlier post (message 1, from the seed data) waits as well.
+        assertEquals(403, send("PATCH", "/messages/1", "{\"message_text\":\"edited while waiting\"}", token).statusCode());
+        assertSeedMessage(mapper.readTree(get("/messages/1").body()));
+        confirmEmail("old.member@example.test");
+        assertEquals(200, send("POST", "/messages", messageJson(1, "confirmed", 1L), token).statusCode());
+        assertEquals(200, send("PATCH", "/messages/1", "{\"message_text\":\"edited after confirming\"}", token).statusCode());
+    }
+
+    @Test
+    void theAccountEndpointsAreForTheOwnerOnly() throws Exception {
+        String second = registerSecondUser();
+        assertEquals(401, get("/me").statusCode());
+        assertEquals(401, send("GET", "/me", null, "made-up-token").statusCode());
+        assertEquals(401, send("POST", "/email/verification", null, null).statusCode());
+        assertEquals(401, send("POST", "/accounts/1/email", emailJson("thief@example.test"), null).statusCode());
+        assertEquals(403, send("POST", "/accounts/1/email", emailJson("thief@example.test"), second).statusCode(),
+                "account 2 may not give account 1 an address");
+        assertEquals(400, send("POST", "/accounts/1/email", emailJson("second@example.test"),
+                loginToken("testuser1", "password")).statusCode(), "the address of another account is taken");
+        assertEquals(2, mapper.readTree(send("GET", "/me", null, second).body()).get("account_id").asInt());
+    }
+
+    // ---- the forgotten password (2.4) ----
+
+    private static String resetJson(String secret, String password) {
+        return "{\"token\":\"" + secret + "\",\"password\":\"" + password + "\"}";
+    }
+
+    @Test
+    void forgotPasswordAnswersTheSameWhetherOrNotTheAddressIsKnown() throws Exception {
+        registerSecondUser();
+        HttpResponse<String> known = send("POST", "/password/forgot", emailJson("second@example.test"), null);
+        HttpResponse<String> unknown = send("POST", "/password/forgot", emailJson("nobody@example.test"), null);
+        HttpResponse<String> malformed = send("POST", "/password/forgot", emailJson("not an address"), null);
+        for (HttpResponse<String> response : java.util.List.of(known, unknown, malformed)) {
+            assertEquals(200, response.statusCode());
+            assertEquals("", response.body());
+        }
+        assertNotNull(mailbox().lastTo("second@example.test"));
+        assertNull(mailbox().lastTo("nobody@example.test"), "no mail goes to an address that has no account");
+    }
+
+    @Test
+    void aNewPasswordSignsTheAccountOutEverywhereAndTheOldOneStopsWorking() throws Exception {
+        String before = registerSecondUser();
+        String alsoBefore = loginToken("second", "secret12");
+        assertEquals(200, send("POST", "/messages", messageJson(2, "before", 1L), before).statusCode());
+        // No pause here: the sessions end because the account's token generation moves on,
+        // not because time has passed, so "immediately" is exactly the case to test.
+        assertEquals(200, send("POST", "/password/forgot", emailJson("SECOND@example.test"), null).statusCode());
+        String secret = secretMailedTo("second@example.test", "reset");
+        assertEquals(400, send("POST", "/email/verify", tokenJson(secret), null).statusCode(),
+                "a password link cannot be used as a confirmation link");
+        assertEquals(200, send("POST", "/password/reset", resetJson(secret, "brandnew34"), null).statusCode());
+
+        assertEquals(401, send("POST", "/messages", messageJson(2, "old session", 1L), before).statusCode());
+        assertEquals(401, send("GET", "/me", null, alsoBefore).statusCode(), "every earlier session is ended");
+        assertEquals(401, send("POST", "/login", accountJson("second", "secret12"), null).statusCode(), "the old password is gone");
+        String after = loginToken("second", "brandnew34");
+        assertEquals(200, send("POST", "/messages", messageJson(2, "new session", 1L), after).statusCode());
+        assertEquals(200, send("POST", "/messages", messageJson(1, "someone else is not affected", 1L),
+                loginToken("testuser1", "password")).statusCode());
+    }
+
+    @Test
+    void thePasswordLinkWorksOnceAndARefusedPasswordDoesNotUseItUp() throws Exception {
+        registerSecondUser();
+        send("POST", "/password/forgot", emailJson("second@example.test"), null);
+        String secret = secretMailedTo("second@example.test", "reset");
+
+        assertEquals(400, send("POST", "/password/reset", resetJson("not-a-real-secret", "brandnew34"), null).statusCode());
+        assertEquals(400, send("POST", "/password/reset", resetJson(secret, "weak"), null).statusCode(), "too short");
+        assertEquals(400, send("POST", "/password/reset", resetJson(secret, "nodigitshere"), null).statusCode(), "no digit");
+        assertEquals(400, send("POST", "/password/reset", resetJson(secret, "second"), null).statusCode());
+        assertNotNull(loginToken("second", "secret12"), "the password is unchanged after three refusals");
+
+        assertEquals(200, send("POST", "/password/reset", resetJson(secret, "brandnew34"), null).statusCode(),
+                "the link survived the refusals");
+        assertEquals(400, send("POST", "/password/reset", resetJson(secret, "another567"), null).statusCode(), "a link works once");
+        assertNotNull(loginToken("second", "brandnew34"));
+    }
+
+    @Test
+    void noPasswordLinkGoesToAnAddressThatWasNeverConfirmed() throws Exception {
+        assertEquals(200, send("POST", "/register", registrationJson("newbie", "secret12", "typo@example.test"), null).statusCode());
+        mailbox().clear();
+        assertEquals(200, send("POST", "/password/forgot", emailJson("typo@example.test"), null).statusCode());
+        assertNull(mailbox().lastTo("typo@example.test"),
+                "whoever owns a mistyped address must not be handed the account");
+    }
+
+    @Test
+    void askingForPasswordLinksIsLimitedPerVisitorAndASecondClickSendsNoSecondMail() throws Exception {
+        registerSecondUser();
+        mailbox().clear();
+        for (int request = 1; request <= 5; request++) {
+            assertEquals(200, send("POST", "/password/forgot", emailJson("second@example.test"), null).statusCode());
+        }
+        assertEquals(1, mailbox().recent().size(), "five clicks within a minute, one mail");
+        HttpResponse<String> sixth = send("POST", "/password/forgot", emailJson("second@example.test"), null);
+        assertEquals(429, sixth.statusCode());
+        assertTrue(sixth.headers().firstValue("Retry-After").isPresent());
+        assertEquals(200, send("POST", "/password/forgot", emailJson("second@example.test"), null,
+                Map.of(PROXY_HEADER, "203.0.113.50")).statusCode(), "another visitor is not affected");
+    }
+
+    @Test
+    void aLoginTokenOfAnAccountThatNoLongerExistsIsRefused() throws Exception {
+        String second = registerSecondUser();
+        assertEquals(200, send("GET", "/me", null, second).statusCode());
+        jdbc.update("delete from account where account_id = ?", 2);
+        assertEquals(401, send("GET", "/me", null, second).statusCode());
+        assertEquals(401, send("POST", "/messages", messageJson(2, "from nobody", 1L), second).statusCode());
+        assertEquals(0, jdbc.queryForObject("select count(*) from account_token where account_id = 2", Integer.class),
+                "the links of a deleted account go with it (foreign key, on delete cascade)");
     }
 }

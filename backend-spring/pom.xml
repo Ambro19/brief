@@ -15,7 +15,7 @@
 
     <groupId>net.onetechly</groupId>
     <artifactId>brief-spring</artifactId>
-    <version>2.3.0</version>
+    <version>2.4.0</version>
     <name>Brief! - Spring Boot edition</name>
     <description>The Brief! API on Spring Boot, Spring Security (JWT), Spring Data JPA (Hibernate), Flyway and Bean Validation</description>
 

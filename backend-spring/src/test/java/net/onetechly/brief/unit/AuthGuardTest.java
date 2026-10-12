@@ -79,4 +79,21 @@ class AuthGuardTest {
         guard.requireWriteAs(null);                                                // nothing to protect: fine
         assertThrows(ForbiddenException.class, () -> guard.requireWriteAs(2));    // someone else: 403
     }
+
+    // ---- what belongs to one account alone (2.4) ----
+
+    @Test
+    void requireSelfNeedsASignedInCallerInEveryMode() {
+        assertThrows(UnauthorizedException.class, () -> guard("strict").requireSelf(1));
+        assertThrows(UnauthorizedException.class, () -> guard("compat").requireSelf(1),
+                "compat mode lets anyone write posts, but nobody may touch another account's email address");
+    }
+
+    @Test
+    void requireSelfLetsACallerActOnTheirOwnAccountOnly() {
+        signInAs(1);
+        assertDoesNotThrow(() -> guard("strict").requireSelf(1));
+        assertThrows(ForbiddenException.class, () -> guard("strict").requireSelf(2));
+        assertThrows(ForbiddenException.class, () -> guard("compat").requireSelf(2));
+    }
 }

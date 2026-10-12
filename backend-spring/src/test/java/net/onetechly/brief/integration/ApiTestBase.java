@@ -2,6 +2,10 @@ package net.onetechly.brief.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import net.onetechly.brief.controller.AccountController;
+import net.onetechly.brief.mail.LogMailer;
+import net.onetechly.brief.mail.Mail;
+import net.onetechly.brief.mail.Mailer;
 import net.onetechly.brief.security.LoginRateLimiter;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +20,9 @@ import java.net.http.HttpResponse;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Shared setup for the end-to-end tests.
@@ -40,6 +47,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  *
  * (docker compose up -d postgres-test starts exactly that database; see docker-compose.yml.)
  * Use a database kept for testing only: resetDatabase() below deletes every row before each test.
+ *
+ * Mail (2.4). No mail service is configured in the tests, so the application uses LogMailer:
+ * every message is written to the log and remembered. The helpers at the end of this class
+ * read the link a member would have found in the inbox.
  */
 public abstract class ApiTestBase {
 
@@ -55,12 +66,21 @@ public abstract class ApiTestBase {
     @Autowired
     protected LoginRateLimiter loginRateLimiter;
 
+    /**
+     * The application's mailer. Declared by its interface, because that is the type the bean
+     * has; with no API key set it is a LogMailer, which mailbox() relies on.
+     */
+    @Autowired
+    protected Mailer mailer;
+
     protected final ObjectMapper mapper = new ObjectMapper();
     protected final HttpClient client = HttpClient.newHttpClient();
 
     @BeforeEach
     protected void resetDatabase() {
         loginRateLimiter.reset();
+        mailbox().clear();
+        jdbc.execute("delete from account_token");
         jdbc.execute("delete from mention");
         jdbc.execute("delete from message");
         jdbc.execute("delete from account");
@@ -68,8 +88,10 @@ public abstract class ApiTestBase {
         jdbc.execute("alter table mention alter column mention_id restart with 1");
         jdbc.execute("alter table message alter column message_id restart with 1");
         jdbc.execute("alter table account alter column account_id restart with 1");
+        jdbc.execute("alter table account_token alter column token_id restart with 1");
         // The seed password is plain text on purpose: it exercises the "upgrade to a hash on first login" path.
         // username_key is the lower-case form the application compares names by (Account.keyOf).
+        // The row has no email address: it stands for an account from before 2.4.
         jdbc.update("insert into account (username, username_key, password) values (?, ?, ?)",
                 "testuser1", "testuser1", "password");
         jdbc.update("insert into message (posted_by, message_text, time_posted_epoch) values (?, ?, ?)",
@@ -141,5 +163,68 @@ public abstract class ApiTestBase {
 
     protected void assertSeedMessage(JsonNode node) {
         assertMessage(node, 1, 1, "test message 1", 1669947792L);
+    }
+
+    // ------------------------------------------------------------------ accounts with email (2.4)
+
+    /** The JSON body of POST /register with an email address. */
+    protected static String registrationJson(String username, String password, String email) {
+        return "{\"username\":\"" + username + "\",\"password\":\"" + password + "\",\"email\":\"" + email + "\"}";
+    }
+
+    /** As above, with an invitation code, for a closed board. */
+    protected static String registrationJson(String username, String password, String email, String inviteCode) {
+        return "{\"username\":\"" + username + "\",\"password\":\"" + password + "\",\"email\":\"" + email
+                + "\",\"invite_code\":\"" + inviteCode + "\"}";
+    }
+
+    protected static String emailJson(String email) {
+        return "{\"email\":\"" + email + "\"}";
+    }
+
+    protected static String tokenJson(String secret) {
+        return "{\"token\":\"" + secret + "\"}";
+    }
+
+    /** Signs in and returns the login token. */
+    protected String loginToken(String username, String password) throws IOException, InterruptedException {
+        HttpResponse<String> response = send("POST", "/login", accountJson(username, password), null);
+        assertEquals(200, response.statusCode());
+        return response.headers().firstValue(AccountController.TOKEN_HEADER).orElseThrow();
+    }
+
+    /** What the application "sent": with no mail service configured, the messages are kept here. */
+    protected LogMailer mailbox() {
+        return assertInstanceOf(LogMailer.class, mailer, "the tests run without a mail service");
+    }
+
+    /**
+     * The secret of the newest link of this kind ("verify" or "reset") mailed to this address.
+     * Fails the test if no such mail was sent.
+     */
+    protected String secretMailedTo(String email, String kind) {
+        Mail mail = mailbox().lastTo(email);
+        assertNotNull(mail, "no mail was sent to " + email);
+        String marker = "/?" + kind + "=";
+        int at = mail.text().indexOf(marker);
+        assertTrue(at >= 0, "the newest mail to " + email + " carries no " + kind + " link: " + mail.subject());
+        int end = mail.text().indexOf('\n', at);
+        return mail.text().substring(at + marker.length(), end < 0 ? mail.text().length() : end).trim();
+    }
+
+    /** Opens the confirmation link that was mailed to this address, as its owner would. */
+    protected void confirmEmail(String email) throws IOException, InterruptedException {
+        assertEquals(200, send("POST", "/email/verify", tokenJson(secretMailedTo(email, "verify")), null).statusCode());
+    }
+
+    /**
+     * Creates an account with a confirmed email address (username at example.test) and returns
+     * its login token: a member who can post, as the tests of everything else need one.
+     */
+    protected String registerConfirmed(String username, String password) throws IOException, InterruptedException {
+        String email = username.toLowerCase(java.util.Locale.ROOT) + "@example.test";
+        assertEquals(200, send("POST", "/register", registrationJson(username, password, email), null).statusCode());
+        confirmEmail(email);
+        return loginToken(username, password);
     }
 }

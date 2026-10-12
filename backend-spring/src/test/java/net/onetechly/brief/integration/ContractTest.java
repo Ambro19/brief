@@ -27,6 +27,10 @@ import static org.junit.jupiter.api.Assertions.*;
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 "brief.auth.mode=compat",
+                // Stated here so that a variable set on the machine that runs the tests can never
+                // close the board under them, or make them send real mail.
+                "brief.invite-code=",
+                "brief.mail.resend-api-key=",
                 "spring.datasource.url=${BRIEF_TEST_DB_URL:jdbc:h2:mem:brief-contract;DB_CLOSE_DELAY=-1}",
                 "spring.datasource.username=${BRIEF_TEST_DB_USER:sa}",
                 "spring.datasource.password=${BRIEF_TEST_DB_PASSWORD:sa}"})
@@ -672,6 +676,73 @@ class ContractTest extends ApiTestBase {
         assertTrue(cacheControl(get("/messages")).contains("no-store"), "API answers are never cached");
         assertTrue(cacheControl(get("/health")).contains("no-store"));
         assertEquals(404, get("/assets/no-such-file.js").statusCode());
+    }
+
+    // ---- 2.4: email and the closed board do not change the original contract ----
+
+    @Test
+    void theOriginalContractNeedsNoEmailAndReportsAnOpenBoard() throws Exception {
+        JsonNode health = mapper.readTree(get("/health").body());
+        assertEquals("optional", health.get("email").asText());
+        assertEquals("open", health.get("board").asText());
+
+        // exactly the two fields of the training contract, and the member posts at once
+        HttpResponse<String> created = send("POST", "/register", accountJson("plain", "pass"), null);
+        assertEquals(200, created.statusCode());
+        assertAccount(created.body(), 2, "plain", "pass");
+        assertEquals(3, mapper.readTree(created.body()).size(), "register still answers with exactly three fields");
+        assertEquals(200, send("POST", "/messages", messageJson(2, "no email needed", 1L), null).statusCode());
+        assertTrue(mailbox().recent().isEmpty(), "no address, no mail");
+    }
+
+    @Test
+    void anEmailGivenAnywayIsStoredAndCanBeConfirmedButIsNeverRequired() throws Exception {
+        assertEquals(400, send("POST", "/register", registrationJson("mailer", "pass", "not an address"), null).statusCode(),
+                "an address that is given must be one");
+        assertEquals(200, send("POST", "/register", registrationJson("mailer", "pass", "Mailer@Example.Test"), null).statusCode());
+        assertEquals(200, send("POST", "/messages", messageJson(2, "compat mode never waits for a confirmation", 1L), null).statusCode());
+
+        String token = loginToken("mailer", "pass");
+        JsonNode me = mapper.readTree(send("GET", "/me", null, token).body());
+        assertEquals("mailer@example.test", me.get("email").asText());
+        assertFalse(me.get("email_verified").asBoolean());
+        assertTrue(me.get("can_post").asBoolean());
+        confirmEmail("mailer@example.test");
+        assertTrue(mapper.readTree(send("GET", "/me", null, token).body()).get("email_verified").asBoolean());
+    }
+
+    @Test
+    void theAccountEndpointsNeedATokenEvenInCompatMode() throws Exception {
+        assertEquals(401, get("/me").statusCode());
+        assertEquals(401, send("POST", "/accounts/1/email", emailJson("x@example.test"), null).statusCode());
+        assertEquals(401, send("POST", "/email/verification", null, null).statusCode());
+        // and the public ones answer without one
+        assertEquals(200, send("POST", "/password/forgot", emailJson("nobody@example.test"), null).statusCode());
+        assertEquals(400, send("POST", "/email/verify", tokenJson("no-such-secret"), null).statusCode());
+        assertEquals(400, send("POST", "/password/forgot", "{}", null).statusCode(), "a body without an address is unusable");
+    }
+
+    @Test
+    void migrationThreeAddedTheEmailColumnsAndTheTableOfLinks() throws Exception {
+        assertEquals(3, jdbc.queryForObject(
+                "select count(*) from \"flyway_schema_history\" where \"success\" = true and \"version\" in ('1', '2', '3')",
+                Integer.class));
+        // an account from before 2.4 (the seed row) got the defaults
+        assertEquals(0L, jdbc.queryForObject("select token_version from account where account_id = 1", Long.class));
+        assertEquals(1, jdbc.queryForObject("select count(*) from account where account_id = 1 and email is null "
+                + "and email_verified_at is null", Integer.class));
+        // two accounts may both have no address, but not the same one
+        jdbc.update("insert into account (username, username_key, password) values ('noaddress', 'noaddress', 'x')");
+        jdbc.update("insert into account (username, username_key, password, email) values ('a1', 'a1', 'x', 'same@example.test')");
+        assertThrows(DataIntegrityViolationException.class, () -> jdbc.update(
+                "insert into account (username, username_key, password, email) values ('a2', 'a2', 'x', 'same@example.test')"));
+        // no two links with the same hash: a secret leads to exactly one row
+        jdbc.update("insert into account_token (account_id, purpose, token_hash, expires_at, created_at) values (1, 'verify', 'same-hash', 1, 1)");
+        assertThrows(DataIntegrityViolationException.class, () -> jdbc.update("insert into account_token "
+                + "(account_id, purpose, token_hash, expires_at, created_at) values (1, 'reset', 'same-hash', 1, 1)"));
+        // a link must belong to an account
+        assertThrows(DataIntegrityViolationException.class, () -> jdbc.update("insert into account_token "
+                + "(account_id, purpose, token_hash, expires_at, created_at) values (424242, 'verify', 'h', 1, 1)"));
     }
 
     private static String cacheControl(HttpResponse<String> response) {

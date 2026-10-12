@@ -4,7 +4,13 @@
 # creates one web service (built from the Dockerfile) and one PostgreSQL database, connected.
 # Later changes to this file are applied when you push them.
 #
-# Field names follow https://render.com/docs/blueprint-spec (checked October 9, 2026).
+# Field names follow https://render.com/docs/blueprint-spec (checked October 11, 2026).
+#
+# TWO VARIABLES ARE NOT FILLED IN BY THIS FILE, because they are secrets: BRIEF_INVITE_CODE and
+# BRIEF_RESEND_API_KEY (marked "sync: false" below). Render asks for such values only when a
+# Blueprint is created for the first time. On a service that already exists it does not ask and
+# does not add them: type them in yourself under the service's Environment tab. The start-up log
+# says which of the two the application found ("Board: ..." and "Mail: ...").
 
 services:
   - type: web
@@ -15,7 +21,10 @@ services:
     plan: free                      # to try it. Sleeps after 15 idle minutes. Paid: 0.5c-512mb ($7 a month)
     region: virginia                # cannot be changed later. Keep the database in the same region
     healthCheckPath: /health        # Render calls this to know the application is up
-    autoDeployTrigger: commit       # every push to the linked branch deploys
+    # Deploy a commit only after its checks on GitHub have passed (.github/workflows/ci.yml: both
+    # backends' tests, the tests on PostgreSQL, the Docker image, the web app). Until 2.4 this was
+    # "commit": every push went live at once, tested or not.
+    autoDeployTrigger: checksPass
     envVars:
       # Login tokens and ownership rules on. This is also the default; stated here so it is visible.
       - key: BRIEF_AUTH_MODE
@@ -28,6 +37,24 @@ services:
       # the proxy's. This header carries the visitor's own address (see security/ClientAddress.java).
       - key: BRIEF_CLIENT_IP_HEADER
         value: CF-Connecting-IP
+      # Where the web app lives. The links in the mails the application sends point here. It is
+      # written down, not taken from the request, so nobody can make the application mail a link
+      # to another site by asking under another host name.
+      - key: BRIEF_PUBLIC_URL
+        value: https://briefmessage.net
+      # Who the mails come from. The domain must be verified at Resend (three DNS records).
+      - key: BRIEF_MAIL_FROM
+        value: "Brief! <hello@briefmessage.net>"
+      # The key for Resend, the service that delivers the mails. A secret: set it in the dashboard.
+      # Without it nothing is sent; each mail is written to the log instead, and the log says so.
+      - key: BRIEF_RESEND_API_KEY
+        sync: false
+      # The invitation code. With it set the board is closed: creating an account needs the code and
+      # reading needs a sign-in. At least 8 characters. A secret: set it in the dashboard, give it
+      # to the people you invite, and change it there when it has travelled too far.
+      # Without it the board is open to everyone.
+      - key: BRIEF_INVITE_CODE
+        sync: false
       # The database, as one connection string on Render's private network. The application
       # turns it into the JDBC settings it needs when it starts (config/DatabaseUrl.java).
       - key: DATABASE_URL

@@ -8,7 +8,7 @@ One web app (React + TypeScript) and **two editions of the same Java API**:
 |---|---|---|
 | `backend/` | Javalin edition (1.x) | Javalin, hand-written JDBC, H2 |
 | `backend-spring/` | Spring Boot edition (2.x) | Spring Web, Spring Security (JWT), Spring Data JPA (Hibernate), Flyway, Bean Validation, H2 or PostgreSQL |
-| `frontend/` | Web app | React 18, TypeScript, Vite |
+| `frontend-spring/` | Web app | React 18, TypeScript, Vite |
 
 Both backends answer the original requests with the same responses, so the web app works with either.
 **Development continues on the Spring Boot edition only.** The Javalin edition is frozen at 1.1.0 and
@@ -19,7 +19,11 @@ port 8080. `docs/EDITIONS.md` compares them file by file.
 
 **2.3 is the first build that can be deployed:** it runs on PostgreSQL, creates its tables with versioned
 migrations (Flyway), ships a `Dockerfile` and a `render.yaml`, and can be installed on a phone as an app.
-See [Deploy it](#deploy-it).
+See [Deploy it](#deploy-it). It runs at https://briefmessage.net.
+
+**2.4 makes accounts real:** an account has an email address, confirmed through a mailed link; a forgotten
+password is replaced through a mailed link; and a board can be **closed**, so that only invited people can
+join and only members can read. See [Email, and a closed board](#email-and-a-closed-board).
 
 Brief! started as the Revature "Social Media Blog API" training project and keeps that project's
 eight-endpoint contract intact.
@@ -35,7 +39,7 @@ includes the Maven Wrapper (`mvnw`), which downloads Maven the first time you us
 
 ```powershell
 cd backend-spring
-.\mvnw.cmd test                    # 207 tests
+.\mvnw.cmd test                    # 303 tests
 .\mvnw.cmd package                 # builds target\brief-spring.jar
 java -jar target\brief-spring.jar  # open http://localhost:8080
 ```
@@ -48,9 +52,23 @@ New accounts need a username of **3 to 30 letters, numbers, dots, dashes or unde
 **8 or more characters with a letter and a number** (for example `secret12`). A username is one name
 whatever its capitals: if `Maya` exists, `maya` is taken, and either spelling signs in.
 
+Since 2.4 a new account also gives an **email address**, and can read but not post until the address is
+confirmed. On your own machine no mail is sent: the application writes each mail to the console instead.
+Look for the line `MAIL NOT SENT (no mail service is configured)`, and open the link below it (it starts
+with `http://localhost:8080/?verify=`). "Forgot password?" works the same way.
+
 When it starts, the log says which database is in use (`Database: H2 file ./h2/brief-spring on this machine.`).
 You may also see `Flyway upgrade recommended: H2 2.2.224 is newer than this version of Flyway`. That is a
 notice, not an error.
+
+**Coming from 2.3 with data you want to keep?** Copy the `backend-spring\h2` folder of the old version into
+the new one, and keep a second copy somewhere else first. At the first start the log shows
+`Migrating schema "PUBLIC" to version "3 - account email and tokens"`. Accounts made before 2.4 have no
+email address; they keep working, and the web app asks their owners for one after signing in.
+
+**The web app's folder was renamed in 2.4**, from `frontend` to `frontend-spring`. If you unpack 2.4 over an
+older copy, delete the old `frontend` folder (in a Git repository: `git rm -r frontend`, or rename it first
+with `git mv frontend frontend-spring`, which keeps its history).
 
 **Coming from 2.2 with data you want to keep?** Copy the `backend-spring\h2` folder of the old version into
 the new one, **and keep a second copy somewhere else first**. At the first start 2.3 changes that database
@@ -65,7 +83,7 @@ docker compose up -d postgres                                        # PostgreSQ
 java -jar target\brief-spring.jar --spring.profiles.active=postgres
 ```
 
-**The tests on PostgreSQL.** The same 207 tests, with the end-to-end ones against a real PostgreSQL:
+**The tests on PostgreSQL.** The same 303 tests, with the end-to-end ones against a real PostgreSQL:
 
 ```powershell
 docker compose up -d postgres-test                                   # port 5433, starts empty every time
@@ -98,7 +116,7 @@ On macOS or Linux use `./mvnw` instead of `.\mvnw.cmd`.
 ### Frontend
 
 ```powershell
-cd frontend
+cd frontend-spring
 npm install      # required once - until this runs, the editor shows red lines (it cannot find React)
 npm run dev      # http://localhost:5173, API calls are forwarded to :8080
 npm run build    # type-checks, builds, and copies the web app into BOTH backends
@@ -112,7 +130,8 @@ what the jar and the Docker image serve. After changing the web app, build it be
 ## Deploy it
 
 Everything a host needs is in the repository. The step-by-step guide, with every screen, is
-`docs/Brief_Launch_Roadmap_v2.pdf`; this is the short version.
+`docs/Brief_Launch_Roadmap_v2.pdf`, and `docs/Brief_Launch_Roadmap_v3.pdf` records how the first deployment
+went; this is the short version.
 
 **As a Docker image, anywhere:**
 
@@ -126,8 +145,16 @@ uses that PostgreSQL database instead; the tables are created at the first start
 
 **On Render:** push the repository to GitHub, then in Render choose **New > Blueprint** and pick it.
 `render.yaml` creates the web service (built from the `Dockerfile`) and a PostgreSQL 16 database, generates
-the token-signing key, and connects the two. Nothing has to be typed in. After the first deploy, check the
-log for the line `Database: PostgreSQL, ...`.
+the token-signing key, and connects the two. After the first deploy, check the log for the line
+`Database: PostgreSQL, ...`.
+
+Two values are secrets and are **not** in `render.yaml`: `BRIEF_INVITE_CODE` and `BRIEF_RESEND_API_KEY`. Render
+asks for them when a Blueprint is first created. On a service that already exists it does not: add them under
+the service's **Environment** tab. The start-up log tells you what the application found, in two lines that
+start with `Board:` and `Mail:`.
+
+Since 2.4 Render deploys a commit only **after its checks on GitHub have passed** (`autoDeployTrigger: checksPass`).
+A push whose tests fail stays on GitHub.
 
 What the deployed application reads:
 
@@ -138,6 +165,10 @@ What the deployed application reads:
 | `BRIEF_JWT_SECRET` | `render.yaml`, generated once | Signs login tokens. Because it is fixed, logins survive a redeploy |
 | `BRIEF_CLIENT_IP_HEADER` | `render.yaml`: `CF-Connecting-IP` | The header that carries the visitor's address behind Render's proxy, for the login rate limit |
 | `BRIEF_AUTH_MODE` | `render.yaml`: `strict` | See "Two modes" below |
+| `BRIEF_PUBLIC_URL` | `render.yaml`: `https://briefmessage.net` | Where the links in mails point |
+| `BRIEF_MAIL_FROM` | `render.yaml`: `Brief! <hello@briefmessage.net>` | The sender of the mails. Its domain must be verified at Resend |
+| `BRIEF_RESEND_API_KEY` | **you, in the dashboard** | The key of the mail service. Without it mails are written to the log, not sent |
+| `BRIEF_INVITE_CODE` | **you, in the dashboard** | Closes the board: see below. Without it the board is open |
 
 ## Features
 
@@ -154,6 +185,10 @@ What the deployed application reads:
   files are cached by the browser; **Install Brief! on this device** puts the app on a phone's home screen or
   a computer's desktop, where it opens in its own window and still opens without a connection; **Stay signed
   in on this device** keeps the session after the tab or the app is closed.
+- **Since 2.4:** an email address per account, confirmed through a mailed link (until then the member reads
+  but does not post); **Forgot password?** mails a link for choosing a new one, which also signs the account
+  out on every device; a board can be **closed** with an invitation code; an address is shown to nobody but
+  its owner.
 - Posts of up to 255 characters, with the limit drawn as a ruler while you type.
 - **Links:** web addresses in posts open in a new tab, with or without `https://` in front
   (`pixelperfectapi.net` works). Posts are never treated as HTML.
@@ -162,17 +197,18 @@ What the deployed application reads:
 - The page re-reads the feed and mentions every 15 seconds.
 - API documentation (Swagger UI) at `/docs/index.html`.
 
-Limits: alerts only reach someone who has Brief! open, in a tab or as the installed app; there is no email
-or phone push yet. Desktop notifications and installing need `localhost` or HTTPS, so on a phone they work
+Limits: alerts only reach someone who has Brief! open, in a tab or as the installed app; mentions are not
+mailed, and there is no phone push yet. A confirmed email address cannot be changed yet, and an account
+without a confirmed address has no way back in if its password is forgotten. Desktop notifications and installing need `localhost` or HTTPS, so on a phone they work
 once the site is deployed, not over `http://192.168...`. A username that is an ordinary word will be matched
 whenever that word is written. A bare address becomes a link only if it ends in a common ending (`.com`,
-`.net`, `.org`, `.io`, ...; the list is in `frontend/src/lib/richText.ts`); any address works with `https://`.
+`.net`, `.org`, `.io`, ...; the list is in `frontend-spring/src/lib/richText.ts`); any address works with `https://`.
 
 ## API
 
 | Method | Path | Success | Failure |
 |---|---|---|---|
-| POST | `/register` | 200 + account | 400 invalid, username or password against the rule, or username taken (in any capitals) |
+| POST | `/register` | 200 + account | 400 invalid, username, password or email against the rule, or username or email taken; 403 wrong or missing invitation code (closed board); 429 after too many wrong codes |
 | POST | `/login` | 200 + account, token in `X-Auth-Token` header | 401; 429 after too many attempts (Spring, strict) |
 | POST | `/logout` | 200 (always) | |
 | GET | `/accounts` | 200 + list of `{account_id, username}` | |
@@ -186,7 +222,16 @@ whenever that word is written. A bare address becomes a link only if it ends in 
 | GET | `/messages/{id}` | 200 + message, or 200 with empty body | |
 | PATCH | `/messages/{id}` | 200 + full updated message | 400 |
 | DELETE | `/messages/{id}` | 200 + deleted message, or 200 with empty body | |
-| GET | `/health` | 200 `{"status":"UP"}` (Spring adds `"password_policy"`) | |
+| GET | `/health` | 200 `{"status":"UP"}` (Spring adds `"password_policy"`, and since 2.4 `"email"` and `"board"`) | |
+| GET | `/me` | 200 + `{account_id, username, email, email_verified, can_post}` (Spring, 2.4) | 401 |
+| POST | `/accounts/{id}/email` | 200 + the same; mails the confirmation link (Spring, 2.4) | 400 not an address, taken, or already confirmed; 401; 403 someone else's account |
+| POST | `/email/verification` | 200; mails the link again (Spring, 2.4) | 400 nothing to confirm; 401; 429 within a minute |
+| POST | `/email/verify` | 200; body `{"token": "<secret from the link>"}`, no sign-in needed (Spring, 2.4) | 400 unknown, used or expired |
+| POST | `/password/forgot` | 200 **always**, whether or not the address has an account (Spring, 2.4) | 429 after five requests from one address |
+| POST | `/password/reset` | 200; body `{"token": "...", "password": "..."}`, no sign-in needed (Spring, 2.4) | 400 link not good, or password against the rule |
+
+On a **closed board** every `GET` of posts and members (`/messages...`, `/accounts...`) also answers 401
+without a valid token.
 
 Error responses have an empty body; the status code carries the meaning.
 
@@ -206,9 +251,41 @@ The three lists that page (`/messages`, `/accounts/{id}/messages`, `/accounts/{i
 | New username (Spring Boot edition, 2.3) | not blank | 3 to 30 letters, digits, dots, dashes or underscores |
 | New password (Spring Boot edition) | 4+ characters | 8+ characters, a letter and a digit, not the username |
 | Failed logins (Spring Boot edition) | not limited | 5 per username and address, then 429 for 15 minutes. An IPv6 address counts together with the rest of its /64 block |
+| Email address for a new account (Spring Boot edition, 2.4) | optional | required |
+| Posting before the address is confirmed (2.4) | allowed | 403 |
+| Invitation code (2.4) | cannot be set: the application refuses to start | optional; set = closed board |
 
 Send the token as `Authorization: Bearer <token>`. In the Spring Boot edition the token is a JWT
-(`header.payload.signature`), signed with HMAC-SHA256, valid for 12 hours or until you sign out.
+(`header.payload.signature`), signed with HMAC-SHA256, valid for 12 hours, or until you sign out, or (2.4)
+until the account's password is replaced through a mailed link.
+
+### Email, and a closed board
+
+**Confirming an address.** `POST /register` with an `email` stores the account and mails a link,
+`<BRIEF_PUBLIC_URL>/?verify=<secret>`. The link opens the web app, which sends the secret to
+`POST /email/verify`. A link works once, for 24 hours; asking for a new one makes the earlier one stop
+working. The database keeps only a SHA-256 hash of the secret. An account made before 2.4 has no address:
+it keeps posting, and can add one (`POST /accounts/{id}/email`), after which it confirms like any other.
+
+**A forgotten password.** `POST /password/forgot` with an address answers 200 whatever the address is. If
+it is the *confirmed* address of an account, a link `<BRIEF_PUBLIC_URL>/?reset=<secret>` is mailed, good
+once, for one hour. `POST /password/reset` with the secret and a new password stores it and makes every
+login token of that account worthless, on every device.
+
+**Sending.** Mails go through [Resend](https://resend.com)'s HTTPS API when `BRIEF_RESEND_API_KEY` is set
+(`mail/ResendMailer.java`), otherwise into the log (`mail/LogMailer.java`). To use another service, write
+one more class that implements `mail/Mailer.java`.
+
+**A closed board.** Start the application with `BRIEF_INVITE_CODE` set (8 characters or more) and:
+
+- `POST /register` needs `"invite_code"` with that value; anything else answers 403. Five wrong codes
+  from one address lock that address out for 15 minutes.
+- Reading posts and members needs a sign-in (401 without).
+- The web app, `/health`, the API documentation and the two mailed links stay reachable without one.
+
+`GET /health` then says `"board": "closed"`, and the web app shows a sign-in page instead of the feed. To
+open the board again, remove the variable and restart. To change the code, change the variable and
+restart; members who already joined are not affected.
 
 ### Settings
 
@@ -224,6 +301,10 @@ Send the token as `Authorization: Bearer <token>`. In the Spring Boot edition th
 | `BRIEF_JWT_TTL_MINUTES` | 720 | Spring only. How long a login lasts |
 | `BRIEF_LOGIN_MAX_FAILURES` | 5 | Spring only. Attempts before a lock-out |
 | `BRIEF_LOGIN_LOCKOUT_MINUTES` | 15 | Spring only. Length of the lock-out |
+| `BRIEF_INVITE_CODE` | empty | Spring only, 2.4. Set = closed board (see above). 8+ characters, strict mode only |
+| `BRIEF_PUBLIC_URL` | `http://localhost:8080` | Spring only, 2.4. The address of the web app, used in mailed links |
+| `BRIEF_RESEND_API_KEY` | empty | Spring only, 2.4. The Resend API key. Empty = mails are written to the log. Never put a real key in a file that is committed |
+| `BRIEF_MAIL_FROM` | empty | Spring only, 2.4. The sender, for example `Brief! <hello@briefmessage.net>`. Required when the key is set |
 
 Locked yourself out while testing? Restart the server (the counts are in memory), or wait.
 
@@ -249,7 +330,7 @@ With a backend running, open **http://localhost:8080/docs/index.html** (or click
 "Try it out" sends real requests to your server. For the protected endpoints: run `POST /login`, copy the
 `x-auth-token` value from the response headers, click **Authorize**, and paste it.
 
-The page reads `frontend/public/docs/openapi.json`, which is written by hand. When you change an endpoint,
+The page reads `frontend-spring/public/docs/openapi.json`, which is written by hand. When you change an endpoint,
 update that file too, then run `npm run build`.
 
 ## Tests
@@ -257,12 +338,14 @@ update that file too, then run `npm run build`.
 | Edition | Unit | End to end | Total |
 |---|---|---|---|
 | Javalin (`backend/`) | 39 | 40 | 79 |
-| Spring Boot (`backend-spring/`) | 128 | 79 | 207 |
+| Spring Boot (`backend-spring/`) | 196 | 107 | 303 |
 
 The end-to-end tests start the real application, call it over HTTP, and check status codes and JSON.
-The 41 cases the two editions share are the same; the Spring Boot edition adds 38 for what 2.1, 2.2 and 2.3
+The 41 cases the two editions share are the same; the Spring Boot edition adds 66 for what 2.1 to 2.4
 brought (JWT, paging, the password rule, the rate limit, the mention table, usernames, the migrations and
-foreign keys, caching, the visitor's address behind a proxy). Tests use an in-memory database and never
+foreign keys, caching, the visitor's address behind a proxy, email confirmation, password reset, the closed
+board). The mails in these tests are never sent: the application is started without a mail service, and the
+tests read the links from the mailer that writes to the log. Tests use an in-memory database and never
 touch the `h2/` folders. Since 2.3 that database gets its tables from the same migration files production
 runs, so every test run also tests the migrations.
 
@@ -273,6 +356,11 @@ second time against PostgreSQL 16, a build and start of the Docker image, and th
 
 - `docs/EDITIONS.md` - the Javalin and Spring Boot editions side by side.
 - `CHANGELOG.md` - what changed in each version.
+- `docs/Brief_OTSR_v6_October2026.pdf` - status report after the first deployment: 2.3.0 verified on your
+  machine and on GitHub, live at briefmessage.net, what the deployment taught, what is open.
+- `docs/Brief_Launch_Roadmap_v3.pdf` - the roadmap after going live: what M0 to M2 took, the plan for 2.4
+  and 2.5, the pilot, costs and dates.
+- `docs/Brief_Architecture_Color.pdf`, `docs/Brief_Architecture_BW.pdf` - the system on one page.
 - `docs/Brief_OTSR_v5_October2026.pdf` - status report for 2.3.0, the deployable build: what changed and
   why, how it was verified, defects found, what is still open.
 - `docs/Brief_Launch_Roadmap_v2.pdf` - from localhost to briefmessage.net, updated for 2.3.0: the Cloudflare

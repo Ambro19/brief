@@ -3,16 +3,21 @@ package net.onetechly.brief.service;
 import net.onetechly.brief.dto.AccountResponse;
 import net.onetechly.brief.dto.Credentials;
 import net.onetechly.brief.dto.PublicAccount;
+import net.onetechly.brief.dto.Registration;
 import net.onetechly.brief.entity.Account;
 import net.onetechly.brief.exception.BadRequestException;
+import net.onetechly.brief.exception.ForbiddenException;
 import net.onetechly.brief.exception.NotFoundException;
 import net.onetechly.brief.exception.UnauthorizedException;
 import net.onetechly.brief.repository.AccountRepository;
+import net.onetechly.brief.security.BoardAccess;
+import net.onetechly.brief.security.EmailPolicy;
 import net.onetechly.brief.security.PasswordPolicy;
 import net.onetechly.brief.security.UsernamePolicy;
 import net.onetechly.brief.util.PasswordHasher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +35,9 @@ import java.util.List;
  * Since 2.3 a username is one name whatever its capitals. Every look-up by name goes through
  * Account.keyOf(...), which turns "Maya_Zo" into "maya_zo", and the account table has a unique
  * column holding that form. The name is still stored and shown as the member typed it.
+ *
+ * Since 2.4 a new account also gives an email address (strict mode), and on a closed board
+ * the invitation code. What happens with the address afterwards is AccountEmailService's job.
  */
 @Service
 public class AccountService {
@@ -37,37 +45,90 @@ public class AccountService {
     private final AccountRepository accounts;
     private final UsernamePolicy usernamePolicy;
     private final PasswordPolicy passwordPolicy;
+    private final EmailPolicy emailPolicy;
+    private final BoardAccess board;
+    private final AccountEmailService emailService;
 
     /** Constructor injection: Spring sees the parameters and passes in the objects it created. */
-    public AccountService(AccountRepository accounts, UsernamePolicy usernamePolicy, PasswordPolicy passwordPolicy) {
+    public AccountService(AccountRepository accounts, UsernamePolicy usernamePolicy, PasswordPolicy passwordPolicy,
+                          EmailPolicy emailPolicy, BoardAccess board, AccountEmailService emailService) {
         this.accounts = accounts;
         this.usernamePolicy = usernamePolicy;
         this.passwordPolicy = passwordPolicy;
+        this.emailPolicy = emailPolicy;
+        this.board = board;
+        this.emailService = emailService;
     }
 
-    public AccountResponse register(Credentials credentials) {
-        if (!usernamePolicy.accepts(credentials.username())) {
+    /**
+     * Creates an account. 403 if the board is closed and the invitation code is missing or
+     * wrong; 400 for everything else that is not acceptable.
+     *
+     * {@code @Transactional}: the account row and the row of its confirmation link are stored
+     * together or not at all.
+     */
+    @Transactional
+    public AccountResponse register(Registration registration) {
+        // The invitation code comes first: without it, nothing else about the request is answered.
+        if (!board.admits(registration.inviteCode())) {
+            throw new ForbiddenException();
+        }
+        if (!usernamePolicy.accepts(registration.username())) {
             throw new BadRequestException(); // not a name the mode the application runs in allows
         }
-        if (!passwordPolicy.accepts(credentials.username(), credentials.password())) {
+        if (!passwordPolicy.accepts(registration.username(), registration.password())) {
             throw new BadRequestException(); // too weak for the mode the application runs in
         }
+        String email = null;
+        if (registration.email() != null && !registration.email().isBlank()) {
+            email = EmailPolicy.normalise(registration.email());
+            if (email == null) {
+                throw new BadRequestException(); // something was given, and it is not an address
+            }
+        } else if (emailPolicy.isRequired()) {
+            throw new BadRequestException(); // strict mode: an account needs an address
+        }
         // Taken, in any capitals: "MAYA" is refused when "maya" exists.
-        if (accounts.findByUsernameKey(Account.keyOf(credentials.username())).isPresent()) {
+        if (accounts.findByUsernameKey(Account.keyOf(registration.username())).isPresent()) {
             throw new BadRequestException();
+        }
+        // One address, one account.
+        if (email != null && accounts.findByEmail(email).isPresent()) {
+            throw new BadRequestException();
+        }
+        Account account = new Account(registration.username(), PasswordHasher.hash(registration.password()));
+        if (email != null) {
+            account.setEmail(email);
         }
         Account saved;
         try {
             // Store a hash, never the password itself. The Account constructor fills in username_key.
-            saved = accounts.save(new Account(credentials.username(), PasswordHasher.hash(credentials.password())));
+            saved = accounts.save(account);
         } catch (DataIntegrityViolationException e) {
-            // Two registrations for the same name arrived together; the unique column rejected the second.
+            // Two registrations for the same name or address arrived together; a unique column rejected the second.
             throw new BadRequestException();
         }
-        return new AccountResponse(saved.getAccountId(), saved.getUsername(), credentials.password());
+        if (email != null) {
+            emailService.startVerification(saved); // mail the link that confirms the address
+        }
+        return new AccountResponse(saved.getAccountId(), saved.getUsername(), registration.password());
     }
 
     public AccountResponse login(Credentials credentials) {
+        Account account = authenticate(credentials);
+        return new AccountResponse(account.getAccountId(), account.getUsername(), credentials.password());
+    }
+
+    /**
+     * Checks a username and password and returns the account they belong to, as it was read
+     * for that check. Throws UnauthorizedException (401) on any mismatch.
+     *
+     * The controller issues the login token from this same object, so the token generation in
+     * the token (Account.tokenVersion) is the one that stood next to the password that was
+     * checked. Reading the account a second time could pick up a row whose password has been
+     * replaced in between.
+     */
+    public Account authenticate(Credentials credentials) {
         if (credentials == null || credentials.username() == null || credentials.password() == null) {
             throw new UnauthorizedException();
         }
@@ -95,7 +156,7 @@ public class AccountService {
         if (!matches) {
             throw new UnauthorizedException();
         }
-        return new AccountResponse(account.getAccountId(), account.getUsername(), credentials.password());
+        return account;
     }
 
     /** Everyone who has an account, without passwords. */

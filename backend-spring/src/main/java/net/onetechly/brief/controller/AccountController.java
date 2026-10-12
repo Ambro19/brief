@@ -5,7 +5,11 @@ import jakarta.validation.Valid;
 import net.onetechly.brief.dto.AccountResponse;
 import net.onetechly.brief.dto.Credentials;
 import net.onetechly.brief.dto.PublicAccount;
+import net.onetechly.brief.dto.Registration;
+import net.onetechly.brief.entity.Account;
 import net.onetechly.brief.entity.Message;
+import net.onetechly.brief.exception.ForbiddenException;
+import net.onetechly.brief.security.BoardAccess;
 import net.onetechly.brief.security.ClientAddress;
 import net.onetechly.brief.security.JwtService;
 import net.onetechly.brief.security.LoginRateLimiter;
@@ -42,26 +46,39 @@ public class AccountController {
     private final JwtService jwtService;
     private final LoginRateLimiter loginRateLimiter;
     private final ClientAddress clientAddress;
+    private final BoardAccess board;
 
     public AccountController(AccountService accountService, MessageService messageService,
                              MentionService mentionService, JwtService jwtService,
-                             LoginRateLimiter loginRateLimiter, ClientAddress clientAddress) {
+                             LoginRateLimiter loginRateLimiter, ClientAddress clientAddress, BoardAccess board) {
         this.accountService = accountService;
         this.messageService = messageService;
         this.mentionService = mentionService;
         this.jwtService = jwtService;
         this.loginRateLimiter = loginRateLimiter;
         this.clientAddress = clientAddress;
+        this.board = board;
     }
 
     /**
-     * POST /register - 200 with the new account; 400 if the input is invalid, the username or
-     * the password does not meet the rule of the current mode, or the username is taken
-     * (in any capitals).
+     * POST /register - 200 with the new account; 400 if the input is invalid, the username,
+     * the password or the email does not meet the rule of the current mode, or the username
+     * (in any capitals) or the email is taken.
+     *
+     * On a closed board (2.4): 403 without the right invitation code, and 429 after too many
+     * wrong codes from one address, so the code cannot be found by trying.
      */
     @PostMapping("/register")
-    public AccountResponse register(@Valid @RequestBody Credentials credentials) {
-        return accountService.register(credentials);
+    public AccountResponse register(@Valid @RequestBody Registration registration, HttpServletRequest request) {
+        if (board.isClosed()) {
+            String attemptKey = LoginRateLimiter.keyForAction("invite", clientAddress.of(request));
+            loginRateLimiter.acquire(attemptKey);                       // counts this try; throws (429) while locked out
+            if (!board.admits(registration.inviteCode())) {
+                throw new ForbiddenException();                         // the try stays counted
+            }
+            loginRateLimiter.recordSuccess(attemptKey);                 // right code: clear the count
+        }
+        return accountService.register(registration);
     }
 
     /**
@@ -73,11 +90,12 @@ public class AccountController {
         // Behind a hosting platform's proxy the connection's address is the proxy's; ClientAddress knows which to use.
         String attemptKey = LoginRateLimiter.keyFor(clientAddress.of(request), credentials.username());
         loginRateLimiter.acquire(attemptKey);                           // counts this attempt; throws (429) while locked out
-        AccountResponse account = accountService.login(credentials);    // throws (401) on a mismatch: the attempt stays counted
+        Account account = accountService.authenticate(credentials);    // throws (401) on a mismatch: the attempt stays counted
         loginRateLimiter.recordSuccess(attemptKey);                     // right password: clear the count
         return ResponseEntity.ok()
-                .header(TOKEN_HEADER, jwtService.issue(account.accountId()))
-                .body(account);
+                // The token carries the account's token generation; a later password reset makes it worthless.
+                .header(TOKEN_HEADER, jwtService.issue(account.getAccountId(), account.getTokenVersion()))
+                .body(new AccountResponse(account.getAccountId(), account.getUsername(), credentials.password()));
     }
 
     /** POST /logout - always 200. Ending a session that is already gone is not an error. */

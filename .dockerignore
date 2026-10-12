@@ -3,7 +3,7 @@
 .git
 .github
 docs
-frontend
+frontend-spring
 backend
 **/target
 **/h2

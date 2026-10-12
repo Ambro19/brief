@@ -5,6 +5,7 @@ import net.onetechly.brief.dto.MessageRequest;
 import net.onetechly.brief.dto.MessageTextRequest;
 import net.onetechly.brief.entity.Message;
 import net.onetechly.brief.security.AuthGuard;
+import net.onetechly.brief.service.AccountEmailService;
 import net.onetechly.brief.service.MessageService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -25,16 +26,22 @@ public class MessageController {
 
     private final MessageService messageService;
     private final AuthGuard authGuard;
+    private final AccountEmailService emailService;
 
-    public MessageController(MessageService messageService, AuthGuard authGuard) {
+    public MessageController(MessageService messageService, AuthGuard authGuard, AccountEmailService emailService) {
         this.messageService = messageService;
         this.authGuard = authGuard;
+        this.emailService = emailService;
     }
 
-    /** POST /messages - 200 with the saved message, 400 if it is invalid. */
+    /**
+     * POST /messages - 200 with the saved message, 400 if it is invalid. In strict mode: 403
+     * while the author's email address is waiting to be confirmed (2.4).
+     */
     @PostMapping("/messages")
     public Message create(@Valid @RequestBody MessageRequest request) {
         authGuard.requireWriteAs(request.postedBy());
+        emailService.requireMayPost(request.postedBy());
         return messageService.create(request);
     }
 
@@ -76,7 +83,9 @@ public class MessageController {
     public Message update(
             @PathVariable("messageId") int messageId,
             @Valid @RequestBody MessageTextRequest request) {
-        authGuard.requireWriteAs(ownerOf(messageId));
+        Integer owner = ownerOf(messageId);
+        authGuard.requireWriteAs(owner);
+        emailService.requireMayPost(owner); // editing is writing: the same rule as for a new post
         return messageService.updateText(messageId, request.messageText());
     }
 

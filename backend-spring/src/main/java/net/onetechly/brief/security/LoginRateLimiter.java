@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.LongSupplier;
 
 /**
@@ -42,6 +43,9 @@ public class LoginRateLimiter {
     /** Above this many tracked keys, finished entries are swept out so the map cannot grow without bound. */
     private static final int SWEEP_THRESHOLD = 10_000;
 
+    /** The least time between two sweeps (2.4). */
+    static final long SWEEP_INTERVAL_SECONDS = 60;
+
     /**
      * A ceiling that holds even if the sweep finds nothing to remove, which is the case when
      * someone sends a flood of attempts under ever-new names: all of those entries are still
@@ -55,6 +59,10 @@ public class LoginRateLimiter {
     static final int NAME_LENGTH_IN_KEY = 64;
 
     private final Map<String, Attempts> attemptsByKey = new ConcurrentHashMap<>();
+    /** The second from which the next sweep may run. volatile: read and written by many request threads. */
+    private volatile long nextSweepAt = 0;
+    /** How many sweeps have run. Only the tests read it. */
+    private final AtomicInteger sweeps = new AtomicInteger();
     private final boolean enabled;
     private final int maxAttempts;
     private final long lockoutSeconds;
@@ -101,7 +109,14 @@ public class LoginRateLimiter {
         }
         long now = clockSeconds.getAsLong();
         if (attemptsByKey.size() > SWEEP_THRESHOLD) {
-            attemptsByKey.values().removeIf(attempts -> attempts.isOver(now, lockoutSeconds));
+            // The sweep looks at every entry, so it must not run on every attempt: in 2.3 it did,
+            // and a flood of attempts under new names made each one scan all the others. Now it
+            // runs at most once per interval; in between, the ceiling below is the only check.
+            if (now >= nextSweepAt) {
+                nextSweepAt = now + SWEEP_INTERVAL_SECONDS;
+                sweeps.incrementAndGet();
+                attemptsByKey.values().removeIf(attempts -> attempts.isOver(now, lockoutSeconds));
+            }
             if (attemptsByKey.size() > HARD_LIMIT) {
                 attemptsByKey.clear();
             }
@@ -138,6 +153,20 @@ public class LoginRateLimiter {
     /** Forgets everything. Used by the tests between cases. */
     public void reset() {
         attemptsByKey.clear();
+    }
+
+    /** How many times the clean-up has run. Used by the tests. */
+    public int sweeps() {
+        return sweeps.get();
+    }
+
+    /**
+     * A counter for something other than a login: asking for a password-reset mail, trying an
+     * invitation code (2.4). The key starts with "#", which no address does, so it can never
+     * collide with a login counter, whatever username someone types.
+     */
+    public static String keyForAction(String action, String remoteAddress) {
+        return "#" + action + "|" + AddressGroup.of(remoteAddress);
     }
 
     /** How many keys are being tracked right now. Used by the tests. */

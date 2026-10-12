@@ -1,5 +1,5 @@
 /*
- * Brief! service worker (2.3).
+ * Brief! service worker (2.3; unchanged in 2.4).
  *
  * A service worker is a small script the browser keeps running beside the page. It sees the
  * page's network requests and may answer them itself. This one does a single job: keep a copy

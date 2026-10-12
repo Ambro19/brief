@@ -28,7 +28,7 @@ import java.util.function.LongSupplier;
  *     header . payload . signature
  *
  *   header     {"alg":"HS256","typ":"JWT"}                 how the token is signed
- *   payload    {"sub":"7","jti":"...","iat":...,"exp":...}  who it is for and until when
+ *   payload    {"sub":"7","jti":"...","iat":...,"exp":...,"ver":0}  who it is for and until when
  *   signature  HMAC-SHA256(header + "." + payload, secret key)
  *
  * Each piece is Base64URL encoded. The payload is NOT encrypted: anyone can read it, so
@@ -43,6 +43,12 @@ import java.util.function.LongSupplier;
  * small list of revoked token ids until those tokens would have expired anyway. That list
  * is in memory: with a fixed BRIEF_JWT_SECRET, a restart forgets it and a signed-out token
  * works again until it expires. A larger system keeps the list in the database or in Redis.
+ *
+ * Since 2.4 one kind of early end IS kept in the database: setting a new password. The account
+ * row holds a number, its current "token generation". Every token carries the number it was
+ * issued under ("ver"), and JwtAuthenticationFilter accepts a token only while the two are
+ * equal. A new password adds one to the number in the row. That survives a restart, which the
+ * answer to a forgotten password must.
  *
  * The signing uses only the JDK (javax.crypto), so every step is visible in this file. A
  * library such as jjwt or Spring's oauth2-resource-server does the same job and is the usual
@@ -111,6 +117,14 @@ public class JwtService {
 
     /** Creates a signed token for this account. */
     public String issue(int accountId) {
+        return issue(accountId, 0);
+    }
+
+    /**
+     * As above, for an account whose current token generation is tokenVersion (2.4; see
+     * Account.tokenVersion). The number travels in the claim "ver".
+     */
+    public String issue(int accountId, int tokenVersion) {
         long now = clockSeconds.getAsLong();
         byte[] id = new byte[16];
         random.nextBytes(id);
@@ -120,6 +134,7 @@ public class JwtService {
         claims.put("jti", ENCODER.encodeToString(id));       // token id: lets one token be revoked
         claims.put("iat", now);                              // issued at
         claims.put("exp", now + ttlSeconds);                 // expires at
+        claims.put("ver", tokenVersion);                     // the account's token generation when this was issued
         String payload;
         try {
             payload = ENCODER.encodeToString(mapper.writeValueAsBytes(claims));
@@ -130,17 +145,33 @@ public class JwtService {
         return signedPart + "." + ENCODER.encodeToString(sign(signedPart));
     }
 
+    /** What a valid token says: whose it is, and under which token generation of the account it was issued. */
+    public record TokenInfo(int accountId, int tokenVersion) {
+    }
+
     /**
      * Returns the account id the token belongs to, or null if the token is missing, malformed,
      * signed with another key, altered, expired, or signed out.
      */
     public Integer resolve(String token) {
+        TokenInfo info = read(token);
+        return info == null ? null : info.accountId();
+    }
+
+    /**
+     * As resolve, and also the token generation the token was issued under (2.4). The caller
+     * needs that to refuse tokens from before the account's password was last replaced: see
+     * JwtAuthenticationFilter.
+     */
+    public TokenInfo read(String token) {
         JsonNode claims = verifiedClaims(token);
         if (claims == null || revoked.containsKey(claims.path("jti").asText())) {
             return null;
         }
         try {
-            return Integer.valueOf(claims.path("sub").asText());
+            // A token without "ver" was issued by 2.3 or earlier and counts as generation 0. Such a
+            // token keeps working after the upgrade, until the account's password is replaced.
+            return new TokenInfo(Integer.parseInt(claims.path("sub").asText()), claims.path("ver").asInt(0));
         } catch (NumberFormatException e) {
             return null;
         }

@@ -23,6 +23,9 @@ public interface AccountRepository extends JpaRepository<Account, Integer> {
      */
     Optional<Account> findByUsernameKey(String usernameKey);
 
+    /** The account with this email address (2.4). The argument must be in lower case, as it is stored. */
+    Optional<Account> findByEmail(String email);
+
     List<Account> findAllByOrderByAccountIdAsc();
 
     /**

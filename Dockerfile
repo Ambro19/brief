@@ -17,7 +17,7 @@ FROM maven:3.9.9-eclipse-temurin-17 AS build
 WORKDIR /build
 COPY backend-spring/pom.xml .
 COPY backend-spring/src ./src
-# The web app is already inside src/main/resources/public ("npm run build" in frontend/ puts it there).
+# The web app is already inside src/main/resources/public ("npm run build" in frontend-spring/ puts it there).
 # Tests are skipped here: they run on your machine and in CI before anything is deployed.
 RUN mvn -B -ntp -DskipTests package
 

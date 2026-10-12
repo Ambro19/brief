@@ -131,4 +131,26 @@ class JwtServiceTest {
         assertNull(JwtService.extractBearerToken("abc"));
         assertNull(JwtService.extractBearerToken(null));
     }
+
+    // ---- the token generation (2.4) ----
+
+    @Test
+    void readTellsWhoseTheTokenIsAndUnderWhichGenerationItWasIssued() {
+        assertEquals(new JwtService.TokenInfo(7, 0), jwt.read(jwt.issue(7)));
+        assertEquals(new JwtService.TokenInfo(7, 3), jwt.read(jwt.issue(7, 3)));
+        assertEquals(Integer.valueOf(7), jwt.resolve(jwt.issue(7, 3)));
+    }
+
+    @Test
+    void readRefusesWhateverResolveRefuses() {
+        assertNull(jwt.read(null));
+        assertNull(jwt.read("made-up-token"));
+        assertNull(new JwtService(OTHER_KEY, 600, now::get).read(jwt.issue(7)));
+        String signedOut = jwt.issue(7);
+        jwt.revoke(signedOut);
+        assertNull(jwt.read(signedOut));
+        String old = jwt.issue(7);
+        now.addAndGet(600);
+        assertNull(jwt.read(old), "expired");
+    }
 }

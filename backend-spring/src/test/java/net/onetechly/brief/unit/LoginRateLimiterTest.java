@@ -175,4 +175,38 @@ class LoginRateLimiterTest {
         attempt(key, 3);
         assertThrows(TooManyRequestsException.class, () -> limiter.acquire(key));
     }
+
+    // ---- the clean-up (2.4) ----
+
+    @Test
+    void theCleanUpRunsAtMostOncePerIntervalHoweverManyAttemptsArrive() {
+        // In 2.3 every attempt above 10,000 remembered keys looked at all of them. 40,000 more
+        // attempts meant hundreds of millions of looks, and this loop took many seconds.
+        for (int i = 0; i < 50_000; i++) {
+            limiter.acquire(LoginRateLimiter.keyFor("10.0.0.9", "name" + i));
+        }
+        assertEquals(1, limiter.sweeps(), "40,000 attempts above the threshold, within one minute: one clean-up");
+
+        now.addAndGet(59);
+        limiter.acquire(LoginRateLimiter.keyFor("10.0.0.9", "one more"));
+        assertEquals(1, limiter.sweeps(), "still inside the interval");
+
+        now.addAndGet(1);
+        limiter.acquire(LoginRateLimiter.keyFor("10.0.0.9", "and another"));
+        assertEquals(2, limiter.sweeps(), "a minute has passed: the next attempt cleans up");
+        assertEquals(2, limiter.trackedKeys(), "it removed the 50,000 attempts whose minute is over; the last two remain");
+    }
+
+    @Test
+    void countersForOtherActionsCannotCollideWithLoginCounters() {
+        String forgot = LoginRateLimiter.keyForAction("forgot", "10.0.0.1");
+        assertEquals("#forgot|10.0.0.1", forgot);
+        // Whatever someone types as a username, a login key starts with the address. An address
+        // never starts with "#": ClientAddress lets only digits, a-f, dots and colons through.
+        assertNotEquals(forgot, LoginRateLimiter.keyFor("10.0.0.1", "forgot"));
+        assertNotEquals(forgot, LoginRateLimiter.keyFor("10.0.0.1", "#forgot|10.0.0.1"));
+        // one block of IPv6 addresses is one visitor here too
+        assertEquals(LoginRateLimiter.keyForAction("invite", "2001:db8:1:2::1"),
+                LoginRateLimiter.keyForAction("invite", "2001:db8:1:2:ffff::9"));
+    }
 }

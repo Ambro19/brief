@@ -18,7 +18,7 @@ edition only.
 |---|---|---|
 | Start the app | `Main.java`: read settings, create the controller, `app.start(port)` | `BriefApplication.java`: `SpringApplication.run(...)`; settings in `application.properties` |
 | Table rows as objects | `Model/Account.java`, `Model/Message.java` (plain classes) | `entity/Account.java`, `entity/Message.java` (`@Entity`: Hibernate maps them to tables) |
-| Database access | `DAO/AccountDAO.java`, `DAO/MessageDAO.java`: SQL, `PreparedStatement`, `ResultSet`, about 240 lines | `repository/AccountRepository.java`, `MessageRepository.java`, `MentionRepository.java`: three **interfaces** with thirteen method declarations between them and no method bodies. Spring Data writes the implementation |
+| Database access | `DAO/AccountDAO.java`, `DAO/MessageDAO.java`: SQL, `PreparedStatement`, `ResultSet`, about 240 lines | `repository/AccountRepository.java`, `MessageRepository.java`, `MentionRepository.java`, `AccountTokenRepository.java`: four **interfaces** with sixteen method declarations between them and no method bodies. Spring Data writes the implementation |
 | Connections | `Util/ConnectionUtil.java`: a connection pool, try-with-resources everywhere | Nothing to write. Spring Boot configures a pool (HikariCP) from `spring.datasource.*` |
 | Creating tables | `schema.sql`, run at startup by `ConnectionUtil` | Until 2.2: `spring.jpa.hibernate.ddl-auto=update`, Hibernate creates tables from the entities. Since 2.3: numbered SQL files in `db/migration`, run by **Flyway**; Hibernate only checks them (`validate`) |
 | Input rules | `if` statements in the services (`isBlank()`, `length() > 255`) | Annotations on the request records (`@NotBlank`, `@Size(max = 255)`) + `@Valid` in the controller |
@@ -108,9 +108,32 @@ Read-time search versus write-time index:
 | A member registers after being named | Becomes a mention | Does not |
 | Code | Simple | More: three write paths must stay in step |
 
+## Added in 2.3 (Spring Boot edition only)
+
+| Feature | Where | The idea |
+|---|---|---|
+| Versioned migrations | `src/main/resources/db/migration/V1__...sql`, `V2__...`, `V3__...` (Flyway) | The schema changes through numbered SQL files that run once each, in order, on every database. Hibernate only checks the result (`ddl-auto=validate`). A file that has run is never edited; a change is a new file |
+| Two databases, one SQL | the same files | Written in the SQL that H2 and PostgreSQL share, so the tests (H2) and production (PostgreSQL) run the same migrations |
+| Settings from the host | `config/DatabaseUrl.java` | A host hands over one connection string; it is turned into Spring's settings before Spring starts |
+| The visitor's address | `security/ClientAddress.java`, `AddressGroup.java` | Behind a proxy the connection's address is the proxy's. Trust exactly one header, the one the platform sets |
+| Caching static files | `config/WebConfig.java` | Files with a fingerprint in their name can be kept by the browser for a year |
+
+## Added in 2.4 (Spring Boot edition only)
+
+| Feature | Where | The idea |
+|---|---|---|
+| One-time links | `service/AccountTokens.java`, `entity/AccountToken.java` | A long random secret goes into the mail; the database keeps only its SHA-256 hash, as with passwords. A link has a purpose, an expiry time and a "used" mark |
+| Confirming an address | `service/AccountEmailService.java` | Only someone who can read the inbox can send the secret back. Until then: read, but not post |
+| Resetting a password | the same service | The answer to "Forgot password?" never tells whether the address is known. A new password ends every session |
+| Ending sessions with JWT | `Account.tokenVersion`, claim `ver`, `JwtAuthenticationFilter` | A signed token cannot be taken back, so the token carries a number and the account row holds the current one. Costs one look-up by primary key per request with a token: the price of being able to say "not any more" |
+| An interface with two implementations | `mail/Mailer.java`, `LogMailer`, `ResendMailer`, `config/MailConfig.java` (`@Bean`) | The services ask for "a Mailer". Which one they get is decided once, from configuration. The tests get the one that sends nothing |
+| Calling another service | `mail/ResendMailer.java` (`java.net.http.HttpClient`) | In the background, with a time limit, never failing the member's request, never logging the key |
+| Rules that depend on configuration | `config/SecurityConfig.java`, `security/BoardAccess.java` | The filter chain is built at start-up; a closed board adds rules to it. A setting that makes no sense (a code in compat mode) stops the start instead of being ignored |
+| Writing only what changed | `@DynamicUpdate` on `entity/Account.java` | By default Hibernate's UPDATE names every column, so two overlapping changes to one row can undo each other |
+| Deploy what passed | `render.yaml` (`autoDeployTrigger: checksPass`), `.github/workflows/ci.yml` | The tests on GitHub are the gate in front of production |
+
 ## What the Spring edition does not have yet
 
-- Flyway migrations instead of `ddl-auto=update`, including a foreign key from message to account
 - springdoc-openapi to generate the API description from the code
 - A shared store (Redis) for the rate-limit counts and revoked tokens, needed with more than one server
 - Refresh tokens: today a login lasts 12 hours and then the member signs in again

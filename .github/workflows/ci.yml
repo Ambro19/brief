@@ -1,5 +1,9 @@
 # Runs on every push and pull request: both backends are tested (the Spring Boot edition on H2 and on
 # PostgreSQL), the Docker image is built and started, and the web app is built.
+#
+# Since 2.4 these jobs are also the gate in front of production: render.yaml tells Render to deploy
+# a commit only after every job here has passed for it (autoDeployTrigger: checksPass). A commit
+# that fails a test stays on GitHub and never reaches briefmessage.net.
 name: CI
 
 on:
@@ -92,18 +96,18 @@ jobs:
           docker logs brief
           exit 1
 
-  frontend:
+  frontend-spring:
     name: Frontend - type-check and build
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: frontend
+        working-directory: frontend-spring
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: frontend-spring/package-lock.json
       - run: npm ci
       - run: npm run build

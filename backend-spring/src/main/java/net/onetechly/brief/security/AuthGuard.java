@@ -41,6 +41,22 @@ public class AuthGuard {
     }
 
     /**
+     * For what belongs to one account alone (its email address, its profile): the caller must
+     * be signed in (else 401) and must be that account (else 403). Unlike requireWriteAs this
+     * holds in every mode. The original contract has no such endpoints, so there is no
+     * "anyone may" behaviour to keep.
+     */
+    public void requireSelf(int accountId) {
+        Integer callerId = currentAccountId();
+        if (callerId == null) {
+            throw new UnauthorizedException();
+        }
+        if (callerId != accountId) {
+            throw new ForbiddenException();
+        }
+    }
+
+    /**
      * Passes silently if the write is allowed; throws otherwise.
      *
      * @param ownerId the account the write is on behalf of, or null if there is nothing to

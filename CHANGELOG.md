@@ -1,5 +1,171 @@
 # Changelog
 
+## 2.4.0 - 2026-10-11
+
+**Accounts become real** (milestone M3a of the launch roadmap, version 3, section 3). An account has an
+email address that is confirmed through a mailed link; a forgotten password is replaced through a mailed
+link; a board can be closed, so that only invited people join and only members read. The Javalin edition's
+Java code is unchanged; it receives the new web app build, which works with it as before.
+
+**Read "Before you deploy" below before pushing this to GitHub.**
+
+Spring Boot edition:
+
+- **Email address on accounts.** Migration `V3__account_email_and_tokens.sql` adds `account.email` (unique,
+  stored in lower case), `email_verified_at`, `token_version`, and the table `account_token`. In strict mode
+  `POST /register` requires an `email`; in compat mode it is optional, and the original contract is
+  untouched. One address, one account. `GET /accounts` still shows names only: an address is shown to its
+  own account and to nobody else (`GET /me`).
+- **Confirmation.** A link is mailed to the address: `<BRIEF_PUBLIC_URL>/?verify=<secret>`, good once, for
+  24 hours. Until it is used the member can sign in and read, and gets 403 on `POST /messages` and
+  `PATCH /messages/{id}`. `POST /email/verification` mails a new link (at most one per minute; the earlier
+  link stops working); `POST /accounts/{id}/email` corrects an address that is not confirmed yet.
+- **Accounts from before 2.4** have no address. They keep posting. They can add one, and then confirm it
+  like everyone else.
+- **Password reset.** `POST /password/forgot` answers 200 whatever the address, and mails a link
+  (`/?reset=<secret>`, good once, for one hour) only to the confirmed address of an account.
+  `POST /password/reset` stores the new password and ends every session of the account.
+- **Only a hash of a link's secret is stored** (SHA-256 of 32 random bytes), as with passwords
+  (`service/AccountTokens.java`). Opening a link does nothing by itself; the web app sends the secret with a
+  POST, so a mail program that fetches links to check them does not use them up.
+- **Ending sessions.** A login token now carries the account's "token generation" (claim `ver`), and the
+  account row holds the current one (`token_version`). A reset adds one. The filter
+  (`security/JwtAuthenticationFilter.java`) accepts a token only if the account still exists and the two
+  numbers are equal: one look-up by primary key per request that carries a token. Tokens issued by 2.3
+  count as generation 0, so members stay signed in across the upgrade.
+- **Sending mail.** `mail/Mailer.java` has two implementations, chosen at start-up (`config/MailConfig.java`):
+  `ResendMailer` posts to Resend's HTTPS API when `BRIEF_RESEND_API_KEY` is set (in the background, 20 second
+  limit, never failing the member's request, never logging the key or the text of a mail); `LogMailer` writes
+  the mail to the log when it is not. New settings: `BRIEF_RESEND_API_KEY`, `BRIEF_MAIL_FROM`,
+  `BRIEF_PUBLIC_URL`. Links are built from `BRIEF_PUBLIC_URL`, never from the request's host name.
+- **Closed board.** With `BRIEF_INVITE_CODE` set (8+ characters, strict mode only; anything else stops the
+  start with a message): `POST /register` needs `"invite_code"` and answers 403 without it, before saying
+  anything else about the request; five wrong codes from one address lock that address out for 15 minutes;
+  every `GET` and `HEAD` of posts and members answers 401 without a token. The web app, `/health`, the API
+  docs and the two mailed links stay public. `GET /health` reports `"board"` and `"email"`.
+- **Fix: the rate limiter's clean-up** ran on every attempt once 10,000 keys were tracked, and looked at
+  every key each time. It now runs at most once a minute. (Its test took 21 to 26 seconds; the whole suite
+  now takes about that.)
+- **`@DynamicUpdate` on `Account`:** an UPDATE names only the columns that changed, so confirming an address
+  and replacing a password at the same moment cannot undo each other.
+- The start-up log gained two lines, `Board: ...` and `Mail: ...`, and warns on Render when mails are only
+  being logged.
+
+Deployment files:
+
+- **`render.yaml`: `autoDeployTrigger: checksPass`.** Render deploys a commit only after every job of the
+  GitHub workflow has passed for it. Until now every push went live at once.
+- `render.yaml` sets `BRIEF_PUBLIC_URL` and `BRIEF_MAIL_FROM`, and names `BRIEF_RESEND_API_KEY` and
+  `BRIEF_INVITE_CODE` as secrets to be typed into the dashboard (`sync: false`).
+- **Fix: `.gitignore` ignores every `h2` folder** and every `*.mv.db` file. 2.3.0 ignored only the two inside
+  the backends, and a database made by starting the jar from the top folder was committed by accident.
+- **The web app's folder is now `frontend-spring`** (was `frontend`), next to `backend-spring`. The CI job,
+  `.dockerignore`, the build script and the documents follow.
+
+Web app (both editions):
+
+- **Create account** asks for an email address, and on a closed board for the invitation code first, when
+  the server says so in `/health`. Against the Javalin edition or an older server the form is as before.
+- **A panel above the composer** says when an address is waiting to be confirmed, with "Send the link
+  again" and "Use a different address"; the composer is switched off until then. Members from before 2.4
+  are asked for an address there and can put it off ("Not now").
+- **Forgot password?** on the sign-in form, and a "Choose a new password" form opened by the mailed link.
+- **Mailed links**: the secret is taken out of the address bar as soon as the page has read it.
+- **Closed board:** a visitor sees "Members only" and a sign-in form, and the page asks the server for no
+  posts and no member list. Every read now carries the login token.
+- **A session that ended** (expired, or the password was replaced elsewhere) is noticed on the next
+  refresh, not at the next attempt to post.
+- **Fix: one message for passwords that differ.** The form showed two at once, one under the field and one
+  above the button. Now the line under the field is the message. The same goes for every other field: a
+  problem is reported under the field it is about, where the cursor is put.
+- **"Also from OneTechly: PixelPerfect, a screenshot API for developers."** One line under "API docs", for
+  visitors who are not signed in.
+- `docs/openapi.json` describes 2.4.0: six new endpoints, 16 paths in all.
+
+Not in this release, moved to 2.5 (see the roadmap): a bot check at registration (the invitation code does
+that job on a closed board), deleting an account, Terms and Privacy pages, push notifications, longer
+sessions. **Start-up time is unchanged on purpose:** the two minutes measured on Render's free instance are
+the processor (a tenth of a core), and the changes that might help (a different JIT setting, an unpacked
+jar) could not be measured here; one of them would slow password hashing down. The remedy that is known to
+work is the paid instance.
+
+### Before you deploy
+
+`render.yaml` cannot give an existing service its two secrets. In Render, open the service **brief**,
+**Environment**, and add them **before** you push 2.4.0:
+
+1. `BRIEF_INVITE_CODE`: a phrase of your own, 8 characters or more. This closes the board.
+2. `BRIEF_RESEND_API_KEY`: the key from your Resend account, after `briefmessage.net` is verified there.
+
+Saving them restarts 2.3.0, which ignores both. Then push. After the deploy the log must show
+`Board: closed. ...` and `Mail: sent through Resend, from Brief! <hello@briefmessage.net>. ...`.
+
+If the code is missing, 2.4.0 runs as an **open** board, as 2.3.0 does today. If the key is missing, mails
+are written to Render's log and nobody receives one: a new member, and any member who adds an address,
+then cannot post until the link is taken from the log.
+
+In your copy of the repository, the old `frontend` folder has to go: `git mv frontend frontend-spring`
+before unpacking, or `git rm -r frontend` after.
+
+Tests: 303 (was 207). 196 unit, 107 end-to-end.
+
+Verification status at release:
+- **Not yet run with real Spring** - the usual limit of the build environment, which cannot download
+  Spring, Hibernate or Flyway. 2.0.0 to 2.3.0 were written the same way and passed 82 of 82, 133 of 133,
+  149 of 149 and 207 of 207 on the first real run.
+- Run on a stand-in for Spring (real JUnit 5, Mockito, Jackson, H2 and PostgreSQL underneath): all 303
+  tests, on H2 and again on PostgreSQL 16. The stand-in was first given the unchanged 2.3.0 code: 207 of
+  207, the result of the real stack.
+- Run for real there: `V3` on H2 and on PostgreSQL 16, on databases that 2.3.0 had created and filled
+  (accounts and posts kept, old accounts without an address, a second start finds nothing to do), and on
+  an H2 file taken through 2.2.0, 2.3.0 and 2.4.0 in turn.
+- The deployment was rehearsed on PostgreSQL with only the variables `render.yaml` sets: once with the two
+  secrets missing (the board is open, mails go to the log, the log says so), once with them set (closed
+  board, a token issued by 2.3.0 still works, the request to the mail service has the right address, key
+  header and fields, and neither the key nor a link appears in the application's log), a redeploy, and two
+  mistakes in the dashboard that must stop the start (a key without a sender, a code of five characters).
+  The mail service was played by a small server on the same machine. **No mail was sent through Resend.**
+- The web app in Chromium: 79 checks of what is new (on a database made by 2.3.0 and upgraded, and on a
+  closed board), the 56 checks written for 2.3.0 again, and 10 checks of the 2.4 web app served by a 2.3.0
+  server.
+- 104 deliberate bugs were put into the new code, one at a time. The first pass caught 96 of 103. Of the
+  seven that slipped through, six showed a missing test (now added: an edit while waiting for confirmation,
+  the separate counters for codes and password links, single forbidden characters in an address, a changed
+  address losing its confirmation, the unique hash of a link) and one showed a check written twice (now
+  written once). The run was then repeated in full on the final code: 104 of 104 caught. The unchanged
+  code, run three times while the machine was as busy as during that run, passed each time, so a slow
+  machine alone does not count as "caught".
+- **Not done this time: the review by a second, independent reviewer** that 2.3.0 had. The review of this
+  release against the framework's behaviour is my own reading.
+- Defects found by the verification above, all fixed in this release:
+  - The web app did not send the login token when reading. On a closed board a member who had just signed
+    in was shown nothing and signed out again. Found by the browser checks; the API tests could not see it,
+    because the API was right.
+  - Sessions were first ended by time ("tokens older than the reset are refused"). A login being checked at
+    the moment of the reset could get a token that passed. Replaced by the token generation number.
+  - `HEAD` requests were not covered by the closed board's rules.
+  - Two overlapping changes to one account could undo each other (hence `@DynamicUpdate`).
+  - A message at the foot of the taller Create account form was outside the screen.
+  - The tests would have used a mail key or an invitation code found in the machine's environment. They
+    now set both to empty themselves.
+- Unverified until `.\mvnw.cmd test` runs: everything inside real Spring Boot, in particular the new
+  Spring Security rules for the closed board, Hibernate `validate` against V3, `@DynamicUpdate`, the three
+  new derived queries, the transactions around registering and the links, and the 107 end-to-end tests.
+  Expect `Tests run: 303`.
+- Unverified until tried: `docker build`; the first real mail through Resend (the sender's domain must be
+  verified there first); `autoDeployTrigger: checksPass` on your Render service.
+
+Known limits:
+- A confirmed email address cannot be changed yet, and an address cannot be removed.
+- An account without a confirmed address cannot recover a forgotten password.
+- Someone who registers with another person's address holds that address until it is corrected: the real
+  owner cannot register with it meanwhile. On a closed board only invited people can do that.
+- On an open board, `POST /register` answers 400 for an address that already has an account, which tells
+  the asker that it does. The forgot-password form does not tell.
+- A member from before 2.4 who adds an address cannot post until it is confirmed, and cannot take the
+  address back out.
+- Mentions are not mailed. Rate-limit counts and signed-out tokens are still in one server's memory.
+
 ## 2.3.0 - 2026-10-09
 
 **The deployable build** (milestone M1 of the launch roadmap). Until now Brief! ran on one computer with an

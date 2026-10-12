@@ -1,6 +1,8 @@
 package net.onetechly.brief.config;
 
+import net.onetechly.brief.repository.AccountRepository;
 import net.onetechly.brief.security.AuthMode;
+import net.onetechly.brief.security.BoardAccess;
 import net.onetechly.brief.security.JwtAuthenticationFilter;
 import net.onetechly.brief.security.JwtService;
 import org.springframework.context.annotation.Bean;
@@ -25,8 +27,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtService jwtService, AuthMode authMode)
-            throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtService jwtService, AuthMode authMode,
+                                                   BoardAccess board, AccountRepository accounts) throws Exception {
         http
                 // CSRF protection defends cookie-based logins. This API has no cookies: the token
                 // travels in a header that a foreign website cannot add, so the defence is not needed.
@@ -47,10 +49,25 @@ public class SecurityConfig {
                         requests.requestMatchers(HttpMethod.PATCH, "/messages/*").authenticated();
                         requests.requestMatchers(HttpMethod.DELETE, "/messages/*").authenticated();
                     }
-                    requests.anyRequest().permitAll(); // reading, register, login, the web app, the docs
+                    if (board.isClosed()) {
+                        // A closed board (2.4): what members wrote, and who they are, is for members.
+                        // Listed one by one, so that adding an endpoint is a decision and not an accident.
+                        // HEAD as well as GET: Spring answers a HEAD request with the headers of the GET
+                        // (the size of the list, whether there is more), which is not for visitors either.
+                        for (HttpMethod reading : new HttpMethod[] {HttpMethod.GET, HttpMethod.HEAD}) {
+                            requests.requestMatchers(reading,
+                                    "/messages", "/messages/*",
+                                    "/accounts", "/accounts/*", "/accounts/*/messages", "/accounts/*/mentions")
+                                    .authenticated();
+                        }
+                    }
+                    // Everything else: register, login, the email links, /health, the web app, the docs.
+                    // On an open board that includes reading.
+                    requests.anyRequest().permitAll();
                 })
                 // Read the token before Spring Security decides whether the caller is signed in.
-                .addFilterBefore(new JwtAuthenticationFilter(jwtService), UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(new JwtAuthenticationFilter(jwtService, accounts),
+                        UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 }
