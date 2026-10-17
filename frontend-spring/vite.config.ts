@@ -6,7 +6,7 @@ import react from "@vitejs/plugin-react";
 const API = process.env.BRIEF_API ?? "http://localhost:8080";
 // A key that starts with "^" is a regular expression: "^/me$" is the one address /me, and not
 // everything that begins with those three characters.
-const apiPaths = ["/register", "/login", "/logout", "/messages", "/accounts", "/health", "^/me$", "/email", "/password"];
+const apiPaths = ["/register", "/login", "/logout", "/messages", "/accounts", "/health", "^/me$", "/email", "/password", "/invitations"];
 
 export default defineConfig({
   plugins: [react()],

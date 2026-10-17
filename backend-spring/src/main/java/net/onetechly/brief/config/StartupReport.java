@@ -3,7 +3,9 @@ package net.onetechly.brief.config;
 import net.onetechly.brief.mail.AccountMails;
 import net.onetechly.brief.mail.LogMailer;
 import net.onetechly.brief.mail.Mailer;
+import net.onetechly.brief.repository.AccountRepository;
 import net.onetechly.brief.security.BoardAccess;
+import net.onetechly.brief.security.BoardOwner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,13 +35,18 @@ public class StartupReport implements ApplicationRunner {
     private final BoardAccess board;
     private final Mailer mailer;
     private final AccountMails mails;
+    private final BoardOwner owner;
+    private final AccountRepository accounts;
 
     public StartupReport(@Value("${spring.datasource.url}") String datasourceUrl,
-                         BoardAccess board, Mailer mailer, AccountMails mails) {
+                         BoardAccess board, Mailer mailer, AccountMails mails, BoardOwner owner,
+                         AccountRepository accounts) {
         this.datasourceUrl = datasourceUrl;
         this.board = board;
         this.mailer = mailer;
         this.mails = mails;
+        this.owner = owner;
+        this.accounts = accounts;
     }
 
     @Override
@@ -54,6 +61,11 @@ public class StartupReport implements ApplicationRunner {
             log.info(line);
         }
         log.info(describeBoard(board.isClosed()));
+        if (board.isClosedByOldCode()) {
+            log.warn("The board is closed because BRIEF_INVITE_CODE is set. Since 2.5 nobody types that code any more: "
+                    + "members join through invitation links. Set BRIEF_BOARD=closed and delete BRIEF_INVITE_CODE.");
+        }
+        reportOwner();
         String mailLine = "Mail: " + mailer.description() + ". Links in mails point to " + mails.publicUrl() + ".";
         if (onRender && mailer instanceof LogMailer) {
             log.warn("{} THIS IS A HOSTING PLATFORM: members will not receive their confirmation or password "
@@ -66,8 +78,25 @@ public class StartupReport implements ApplicationRunner {
     /** A sentence saying who can use the board. */
     public static String describeBoard(boolean closed) {
         return closed
-                ? "Board: closed. Creating an account needs the invitation code; reading needs a sign-in."
+                ? "Board: closed. Creating an account needs an invitation; reading needs a sign-in."
                 : "Board: open. Anyone can read, and anyone can create an account.";
+    }
+
+    /** The owner line (2.5): who can invite, or a warning when nobody can. */
+    private void reportOwner() {
+        if (!owner.isConfigured()) {
+            String line = "Owner: none (BRIEF_OWNER_USERNAME is not set). Nobody can invite new members.";
+            if (board.isClosed()) {
+                log.warn(line + " On a closed board that means nobody new can join.");
+            } else {
+                log.info(line);
+            }
+            return;
+        }
+        accounts.findByUsernameKey(owner.usernameKey()).ifPresentOrElse(
+                account -> log.info("Owner: {}. Invitations are sent in this name.", account.getUsername()),
+                () -> log.warn("Owner: BRIEF_OWNER_USERNAME names \"{}\", but no account has that name. "
+                        + "Nobody can invite until it names an existing account.", owner.usernameKey()));
     }
 
     /**

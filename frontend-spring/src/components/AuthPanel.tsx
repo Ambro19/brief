@@ -3,13 +3,15 @@ import type { RefObject } from "react";
 import { ApiError, NetworkError, api } from "../api";
 import { looksLikeEmail } from "../lib/links";
 import { loadStayChoice, saveStayChoice } from "../lib/session";
-import type { PasswordPolicy, ServerInfo, Session } from "../types";
+import type { InvitationInfo, PasswordPolicy, ServerInfo, Session } from "../types";
 
 /**
  * The four forms of the account panel.
  *
  *   signin     username and password
- *   register   a new account; asks for an email address and an invitation code when the server wants them
+ *   register   a new account; asks for an email address when the server wants one. On a closed board
+ *              it is open only to someone who came through an invitation link (2.5); anyone else
+ *              is told how to get one.
  *   forgot     "Forgot password?": an email address, to which a link is mailed (2.4)
  *   reset      opened from that link: choose the new password (2.4)
  */
@@ -24,14 +26,19 @@ const PASSWORD_HINT: Record<PasswordPolicy, string> = {
 };
 
 /** What the forms assume until the server has said what it is like: the plainest server there is. */
-const PLAIN_SERVER: ServerInfo = { passwordPolicy: "basic", email: "none", board: "open" };
+const PLAIN_SERVER: ServerInfo = {
+  passwordPolicy: "basic",
+  email: "none",
+  board: "open",
+};
 
 /** Says what is wrong with a new password, or null if it meets the server's rule. Mirrors PasswordPolicy.java. */
 function passwordProblem(password: string, username: string, policy: PasswordPolicy): string | null {
   if (policy === "basic") return password.length < 4 ? "Use a password of at least 4 characters." : null;
   if (password.length < 8) return "Use a password of at least 8 characters.";
   if (!/\p{L}/u.test(password) || !/\p{Nd}/u.test(password)) return "Use at least one letter and one number in the password.";
-  if (username !== "" && password.toLowerCase() === username.toLowerCase()) return "Choose a password that is different from your username.";
+  if (username !== "" && password.toLowerCase() === username.toLowerCase())
+    return "Choose a password that is different from your username.";
   return null;
 }
 
@@ -45,7 +52,13 @@ function waitText(seconds: number | null): string {
 type Note = { text: string; tone: "plain" | "good" | "bad" };
 
 /** The fields that have such a line. */
-type FieldName = "invite" | "username" | "email" | "password";
+type FieldName = "username" | "email" | "password";
+
+/** An invitation link this page was opened with, and what the server said about it (2.5). */
+export interface OpenInvitation {
+  secret: string;
+  info: InvitationInfo;
+}
 
 interface Props {
   /** `stay` is true if the member asked to stay signed in after the tab or the app is closed. */
@@ -58,13 +71,14 @@ interface Props {
   resetSecret: string | null;
   /** The password link was used, or put aside: the app forgets the secret (and, if it was used, any session in this browser). */
   onResetClosed: (passwordChanged: boolean) => void;
+  /** The invitation this page was opened with, or null. With one the panel opens on "Create account" (2.5). */
+  invitation: OpenInvitation | null;
 }
 
-export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onResetClosed }: Props) {
-  const [mode, setMode] = useState<Mode>(resetSecret ? "reset" : "signin");
+export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onResetClosed, invitation }: Props) {
+  const [mode, setMode] = useState<Mode>(resetSecret ? "reset" : invitation ? "register" : "signin");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPasswords, setShowPasswords] = useState(false);
@@ -75,7 +89,10 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
    * A problem with one field; shown in the line under that field, where the cursor is put.
    * Since 2.4 the form can be five fields tall, and a message at its foot would be off the screen.
    */
-  const [fieldProblem, setFieldProblem] = useState<{ field: FieldName; text: string } | null>(null);
+  const [fieldProblem, setFieldProblem] = useState<{
+    field: FieldName;
+    text: string;
+  } | null>(null);
   /** A calm message above the form: "Password changed", "a link is on its way". */
   const [notice, setNotice] = useState<string | null>(null);
   /** True after a form was sent with the two passwords differing (or the second one empty), until either is edited. */
@@ -85,7 +102,6 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
   const [busy, setBusy] = useState(false);
   const usernameInput = useRef<HTMLInputElement>(null);
   const emailInput = useRef<HTMLInputElement>(null);
-  const inviteInput = useRef<HTMLInputElement>(null);
   const passwordInput = useRef<HTMLInputElement>(null);
   const confirmInput = useRef<HTMLInputElement>(null);
 
@@ -93,8 +109,11 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
   const policy = info.passwordPolicy;
   const registering = mode === "register";
   const choosingPassword = registering || mode === "reset";
-  const asksEmail = registering && info.email !== "none";
-  const asksInvite = registering && info.board === "closed";
+  /** The address an invitation was mailed to: fixed, and already confirmed. */
+  const invitedAddress = invitation?.info.email ?? null;
+  const asksEmail = registering && info.email !== "none" && invitedAddress === null;
+  /** A closed board, and no invitation: there is no form to fill in, only the way to get an invitation. */
+  const needsInvitation = registering && info.board === "closed" && invitation === null;
   const name = username.trim();
   const address = email.trim();
   const nameIsValid = USERNAME_RULE.test(name);
@@ -112,12 +131,21 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
   const confirmNote: Note =
     confirm === ""
       ? confirmRejected
-        ? { text: "Type the password a second time to confirm it.", tone: "bad" }
-        : { text: "Type it once more, so a typing slip can't lock you out.", tone: "plain" }
+        ? {
+            text: "Type the password a second time to confirm it.",
+            tone: "bad",
+          }
+        : {
+            text: "Type it once more, so a typing slip can't lock you out.",
+            tone: "plain",
+          }
       : confirm === password
         ? { text: "The two passwords match.", tone: "good" }
         : confirmRejected
-          ? { text: "The two passwords are not the same. Type them again.", tone: "bad" }
+          ? {
+              text: "The two passwords are not the same. Type them again.",
+              tone: "bad",
+            }
           : { text: "The two passwords are not the same yet.", tone: "plain" };
 
   function switchMode(next: Mode) {
@@ -141,7 +169,11 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
     setConfirmRejected(false);
   }
 
-  const inputs: Record<FieldName, RefObject<HTMLInputElement>> = { invite: inviteInput, username: usernameInput, email: emailInput, password: passwordInput };
+  const inputs: Record<FieldName, RefObject<HTMLInputElement>> = {
+    username: usernameInput,
+    email: emailInput,
+    password: passwordInput,
+  };
 
   /** Shows a message under the field it is about, and puts the cursor there. */
   function reject(text: string, field: FieldName) {
@@ -175,7 +207,6 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
 
   async function submitSignInOrRegister() {
     if (registering) {
-      if (asksInvite && inviteCode.trim() === "") return reject("Enter the invitation code you were given.", "invite");
       if (!nameIsValid) return reject(`Choose a username of ${USERNAME_HINT.toLowerCase()}`, "username");
       if (nameIsTaken) return reject(`"${name}" is already taken. Try another username.`, "username");
       if (asksEmail && address === "" && info.email === "required") return reject("Enter your email address.", "email");
@@ -193,7 +224,7 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
     let accountCreated = false;
     try {
       if (registering) {
-        await api.register(name, password, asksEmail ? address : undefined, asksInvite ? inviteCode.trim() : undefined);
+        await api.register(name, password, asksEmail ? address : undefined, invitation?.secret);
         accountCreated = true;
       }
       const session = await api.login(name, password);
@@ -204,13 +235,17 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
       if (problem instanceof NetworkError) {
         setError("The server isn't responding. Check that the API is running, then try again.");
       } else if (registering && !accountCreated && status === 403) {
-        reject("That invitation code isn't right. Check it with the person who invited you.", "invite");
+        setError("This invitation no longer works: it was used, withdrawn, or it expired. Ask the person who invited you for a new one.");
       } else if (registering && !accountCreated && status === 429) {
-        reject(`Too many tries with a wrong invitation code. Try again in ${waitText((problem as ApiError).retryAfterSeconds)}.`, "invite");
+        setError(`Too many tries from this connection. Try again in ${waitText((problem as ApiError).retryAfterSeconds)}.`);
       } else if (registering && !accountCreated && status === 400) {
         // The server answers 400 without saying which rule was broken. What this form could not check itself:
-        if (!asksEmail) reject(`"${name}" is already taken. Try another username.`, "username");
-        else if (takenUsernames !== null) reject("That email address already has an account, or isn't a valid address. Use another one, or sign in.", "email");
+        if (invitedAddress !== null)
+          // Review of 2.5.0: the invited address may have found an account in the meantime, so say both.
+          reject(`"${name}" is already taken, or ${invitedAddress} already has an account. Try another username, or sign in.`, "username");
+        else if (!asksEmail) reject(`"${name}" is already taken. Try another username.`, "username");
+        else if (takenUsernames !== null)
+          reject("That email address already has an account, or isn't a valid address. Use another one, or sign in.", "email");
         else setError("That username or email address is already in use. Try another, or sign in.");
       } else if (status === 401) {
         setError("That username and password don't match.");
@@ -234,7 +269,8 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
       setLinkRequestedFor(address);
     } catch (problem) {
       if (problem instanceof NetworkError) setError("The server isn't responding. Try again in a moment.");
-      else if (problem instanceof ApiError && problem.status === 429) setError(`Too many requests. Try again in ${waitText(problem.retryAfterSeconds)}.`);
+      else if (problem instanceof ApiError && problem.status === 429)
+        setError(`Too many requests. Try again in ${waitText(problem.retryAfterSeconds)}.`);
       else setError("That didn't work. Check the address and try again.");
     } finally {
       setBusy(false);
@@ -259,7 +295,9 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
       if (problem instanceof NetworkError) {
         setError("The server isn't responding. Try again in a moment.");
       } else {
-        setError("That didn't work. The link may have expired or been used already, or the password is the same as your username. Try another password, or ask for a new link.");
+        setError(
+          "That didn't work. The link may have expired or been used already, or the password is the same as your username. Try another password, or ask for a new link.",
+        );
       }
     } finally {
       setBusy(false);
@@ -272,7 +310,6 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
     else void submitSignInOrRegister();
   }
 
-  const inviteNote = noteFor("invite", { text: "This board is by invitation. Use the code from the person who invited you.", tone: "plain" });
   const shownUsernameNote = noteFor("username", usernameNote);
   const emailNote = noteFor("email", {
     text:
@@ -281,7 +318,10 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
         : "We mail you one link to confirm it. It is your way back in if you forget your password. Other members never see it.",
     tone: "plain",
   });
-  const passwordNote = noteFor("password", { text: PASSWORD_HINT[policy], tone: "plain" });
+  const passwordNote = noteFor("password", {
+    text: PASSWORD_HINT[policy],
+    tone: "plain",
+  });
   const passwordType = choosingPassword && showPasswords ? "text" : "password";
   const waitingForServer = registering && server === null;
 
@@ -306,10 +346,31 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
         </p>
       )}
 
-      {mode === "forgot" && linkRequestedFor !== null ? (
+      {registering && invitation && (
+        <div className="invited">
+          <p className="invited-title">{invitation.info.inviter} invited you to Brief!</p>
+          <p className="field-note">Choose a username and a password, and you're in.</p>
+        </div>
+      )}
+
+      {needsInvitation ? (
+        <div className="auth-form">
+          <div className="invite-only">
+            <p className="invite-only-title">Brief! is invitation-only here.</p>
+            <p>
+              To join, ask the person who runs this board to invite you. The invitation comes by email, or as a link, and opens this page
+              ready to create your account.
+            </p>
+          </div>
+          <button type="button" className="btn btn-primary btn-block" onClick={() => switchMode("signin")}>
+            I have an account: sign in
+          </button>
+        </div>
+      ) : mode === "forgot" && linkRequestedFor !== null ? (
         <div className="auth-form">
           <p className="form-notice" role="status">
-            If <strong>{linkRequestedFor}</strong> is the confirmed address of an account, a link is on its way. It works once, for one hour.
+            If <strong>{linkRequestedFor}</strong> is the confirmed address of an account, a link is on its way. It works once, for one
+            hour.
           </p>
           <p className="field-note">Nothing after a few minutes? Look in the spam folder, and check the spelling of the address.</p>
           <button type="button" className="btn btn-primary btn-block" onClick={() => switchMode("signin")}>
@@ -325,27 +386,6 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
             submit();
           }}
         >
-          {asksInvite && (
-            <>
-              <label htmlFor="auth-invite">Invitation code</label>
-              <input
-                id="auth-invite"
-                ref={inviteInput}
-                type="text"
-                autoComplete="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                maxLength={200}
-                aria-describedby="auth-invite-note"
-                value={inviteCode}
-                onChange={(event) => edited(setInviteCode, event.target.value)}
-              />
-              <p className="field-note" id="auth-invite-note" data-tone={inviteNote.tone} aria-live="polite">
-                {inviteNote.text}
-              </p>
-            </>
-          )}
-
           {(mode === "signin" || registering) && (
             <>
               <label htmlFor="auth-username">Username</label>
@@ -369,9 +409,21 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
             </>
           )}
 
+          {registering && invitedAddress !== null && (
+            <>
+              <label htmlFor="auth-email-fixed">Email address</label>
+              <input id="auth-email-fixed" type="email" value={invitedAddress} readOnly aria-describedby="auth-email-fixed-note" />
+              <p className="field-note" id="auth-email-fixed-note" data-tone="good">
+                Confirmed: the invitation was sent to this address. Other members never see it.
+              </p>
+            </>
+          )}
+
           {(asksEmail || mode === "forgot") && (
             <>
-              <label htmlFor="auth-email">{mode === "forgot" || info.email === "required" ? "Email address" : "Email address (optional)"}</label>
+              <label htmlFor="auth-email">
+                {mode === "forgot" || info.email === "required" ? "Email address" : "Email address (optional)"}
+              </label>
               <input
                 id="auth-email"
                 ref={emailInput}
@@ -477,9 +529,24 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
           </button>
           {registering && (
             <p className="field-note auth-after">
-              {asksEmail && info.email === "required"
-                ? "You'll be signed in at once. To post, open the link we mail you."
-                : "You'll be signed in as soon as the account is created."}
+              {invitedAddress !== null
+                ? "You'll be signed in, and can post, at once."
+                : asksEmail && info.email === "required"
+                  ? "You'll be signed in at once. To post, open the link we mail you."
+                  : "You'll be signed in as soon as the account is created."}
+            </p>
+          )}
+          {registering && (
+            <p className="field-note auth-after">
+              By creating an account you agree to the{" "}
+              <a href="/terms.html" target="_blank" rel="noopener">
+                Terms
+              </a>{" "}
+              and the{" "}
+              <a href="/privacy.html" target="_blank" rel="noopener">
+                Privacy notice
+              </a>
+              .
             </p>
           )}
           {mode === "reset" && <p className="field-note auth-after">Setting a new password signs you out on every device.</p>}

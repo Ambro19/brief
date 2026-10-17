@@ -2,6 +2,7 @@ package net.onetechly.brief.controller;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import net.onetechly.brief.dto.AccountDeletion;
 import net.onetechly.brief.dto.AccountResponse;
 import net.onetechly.brief.dto.Credentials;
 import net.onetechly.brief.dto.PublicAccount;
@@ -9,11 +10,14 @@ import net.onetechly.brief.dto.Registration;
 import net.onetechly.brief.entity.Account;
 import net.onetechly.brief.entity.Message;
 import net.onetechly.brief.exception.ForbiddenException;
+import net.onetechly.brief.security.AuthGuard;
 import net.onetechly.brief.security.BoardAccess;
 import net.onetechly.brief.security.ClientAddress;
 import net.onetechly.brief.security.JwtService;
 import net.onetechly.brief.security.LoginRateLimiter;
+import net.onetechly.brief.service.AccountDeletionService;
 import net.onetechly.brief.service.AccountService;
+import net.onetechly.brief.service.InvitationService;
 import net.onetechly.brief.service.MentionService;
 import net.onetechly.brief.service.MessageService;
 import org.springframework.http.ResponseEntity;
@@ -47,10 +51,15 @@ public class AccountController {
     private final LoginRateLimiter loginRateLimiter;
     private final ClientAddress clientAddress;
     private final BoardAccess board;
+    private final InvitationService invitationService;
+    private final AccountDeletionService deletionService;
+    private final AuthGuard authGuard;
 
     public AccountController(AccountService accountService, MessageService messageService,
                              MentionService mentionService, JwtService jwtService,
-                             LoginRateLimiter loginRateLimiter, ClientAddress clientAddress, BoardAccess board) {
+                             LoginRateLimiter loginRateLimiter, ClientAddress clientAddress, BoardAccess board,
+                             InvitationService invitationService, AccountDeletionService deletionService,
+                             AuthGuard authGuard) {
         this.accountService = accountService;
         this.messageService = messageService;
         this.mentionService = mentionService;
@@ -58,6 +67,9 @@ public class AccountController {
         this.loginRateLimiter = loginRateLimiter;
         this.clientAddress = clientAddress;
         this.board = board;
+        this.invitationService = invitationService;
+        this.deletionService = deletionService;
+        this.authGuard = authGuard;
     }
 
     /**
@@ -70,15 +82,37 @@ public class AccountController {
      */
     @PostMapping("/register")
     public AccountResponse register(@Valid @RequestBody Registration registration, HttpServletRequest request) {
-        if (board.isClosed()) {
+        boolean invitationGiven = registration.invitation() != null && !registration.invitation().isBlank();
+        if (board.isClosed() || invitationGiven) {
+            // Invitation links cannot be guessed (256 random bits), but the attempts are counted
+            // anyway, as with logins: five bad ones from an address and it waits 15 minutes.
             String attemptKey = LoginRateLimiter.keyForAction("invite", clientAddress.of(request));
             loginRateLimiter.acquire(attemptKey);                       // counts this try; throws (429) while locked out
-            if (!board.admits(registration.inviteCode())) {
+            if (invitationService.usable(registration.invitation()).isEmpty()) {
                 throw new ForbiddenException();                         // the try stays counted
             }
-            loginRateLimiter.recordSuccess(attemptKey);                 // right code: clear the count
+            loginRateLimiter.recordSuccess(attemptKey);                 // a good invitation: clear the count
         }
-        return accountService.register(registration);
+        return accountService.register(registration);                  // checks the invitation again, and uses it
+    }
+
+    /**
+     * POST /accounts/{accountId}/deletion - {"password": ...}. Deletes the account and its posts
+     * (2.5). 200; 401 without a token; 403 for someone else's account or a wrong password; 400
+     * for the board owner; 429 after five wrong passwords, counted together with sign-ins.
+     *
+     * A POST to a "deletion" address rather than DELETE /accounts/{id}: a DELETE request with a
+     * body is allowed, but some proxies and libraries drop the body of a DELETE.
+     */
+    @PostMapping("/accounts/{accountId}/deletion")
+    public ResponseEntity<Void> deleteAccount(@PathVariable("accountId") int accountId,
+                                              @Valid @RequestBody AccountDeletion deletion, HttpServletRequest request) {
+        authGuard.requireSelf(accountId);
+        String attemptKey = LoginRateLimiter.keyFor(clientAddress.of(request), accountService.usernameOf(accountId));
+        loginRateLimiter.acquire(attemptKey);
+        deletionService.delete(accountId, deletion.password());
+        loginRateLimiter.recordSuccess(attemptKey);
+        return ResponseEntity.ok().build();
     }
 
     /**

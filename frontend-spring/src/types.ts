@@ -66,6 +66,26 @@ export interface Profile {
   email_verified: boolean;
   /** False while an address is waiting to be confirmed. */
   can_post: boolean;
+  /** True for the member who runs the board and can invite people (2.5). Missing from older servers. */
+  is_owner?: boolean;
+}
+
+/** What an invitation link tells the person who opened it (POST /invitations/lookup, 2.5). */
+export interface InvitationInfo {
+  inviter: string;
+  /** The address it was mailed to; null for a link that was passed on by other means. */
+  email: string | null;
+  expires_at: number;
+}
+
+/** An invitation as the board owner sees it in the list (GET /invitations, 2.5). */
+export interface InvitationView {
+  invitation_id: number;
+  email: string | null;
+  created_at: number;
+  expires_at: number;
+  status: "pending" | "used" | "expired";
+  joined_as: string | null;
 }
 
 export const MAX_MESSAGE_LENGTH = 255;

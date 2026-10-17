@@ -1,11 +1,12 @@
 /**
  * Links that arrive by email (2.4).
  *
- * The server mails two kinds of link, and both open this web app with a one-time secret in
+ * The server mails three kinds of link, and all open this web app with a one-time secret in
  * the address:
  *
  *     https://briefmessage.net/?verify=<secret>     confirm an email address
  *     https://briefmessage.net/?reset=<secret>      choose a new password
+ *     https://briefmessage.net/?invite=<secret>     create an account on a closed board (2.5)
  *
  * The app reads the secret, takes it out of the address bar at once (so it is not left in the
  * browser's history, a bookmark or a screenshot), and sends it to the API. Opening the link
@@ -13,7 +14,7 @@
  * safety does not use the link up.
  */
 export interface MailedLink {
-  kind: "verify" | "reset";
+  kind: "verify" | "reset" | "invite";
   secret: string;
 }
 
@@ -25,7 +26,7 @@ export function takeMailedLink(): MailedLink | null {
   let found: MailedLink | null = null;
   try {
     const query = new URLSearchParams(window.location.search);
-    for (const kind of ["verify", "reset"] as const) {
+    for (const kind of ["verify", "reset", "invite"] as const) {
       const secret = query.get(kind);
       if (secret !== null) {
         if (found === null && SECRET.test(secret)) found = { kind, secret };

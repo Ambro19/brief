@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, NetworkError, api } from "./api";
 import { AuthPanel } from "./components/AuthPanel";
 import { Composer } from "./components/Composer";
+import { AccountPanel } from "./components/AccountPanel";
 import { EmailStatus } from "./components/EmailStatus";
+import { InvitePanel } from "./components/InvitePanel";
+import type { OpenInvitation } from "./components/AuthPanel";
 import { InstallHint } from "./components/InstallHint";
 import { MessageItem } from "./components/MessageItem";
 import { takeMailedLink } from "./lib/links";
@@ -11,10 +14,17 @@ import { loadSeenMentionId, loadSession, saveSeenMentionId, saveSession } from "
 import type { Message, MessagePage, Profile, PublicAccount, ServerInfo, Session } from "./types";
 
 /** Which list of posts is on screen. Kept in the URL hash so a view can be linked and reloaded. */
-type View = { kind: "all" } | { kind: "user"; accountId: number } | { kind: "mentions" };
+type View =
+  | { kind: "all" }
+  | { kind: "user"; accountId: number }
+  | { kind: "mentions" }
+  | { kind: "invite" } // the board owner's "Invite people" (2.5)
+  | { kind: "account" }; // "Your account", with deletion (2.5)
 
 function viewFromHash(hash: string): View {
   if (hash === "#/mentions") return { kind: "mentions" };
+  if (hash === "#/invite") return { kind: "invite" };
+  if (hash === "#/account") return { kind: "account" };
   const match = /^#\/u\/(\d+)$/.exec(hash);
   return match ? { kind: "user", accountId: Number(match[1]) } : { kind: "all" };
 }
@@ -100,6 +110,8 @@ export default function App() {
   /** The secret of a password link the page was opened with, until it is used or put aside. */
   const [resetSecret, setResetSecret] = useState<string | null>(mailedLink?.kind === "reset" ? mailedLink.secret : null);
   const [pageNotice, setPageNotice] = useState<PageNotice | null>(null);
+  /** An invitation link this page was opened with, once the server has said it still works (2.5). */
+  const [invitation, setInvitation] = useState<OpenInvitation | null>(null);
   const [view, setView] = useState<View>(() => viewFromHash(window.location.hash));
   const [feed, setFeed] = useState<Feed>(EMPTY_FEED);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -136,7 +148,8 @@ export default function App() {
   const myToken = session?.token;
   const unreadMentions = mentions.filter((m) => m.message_id > seenMentionId).length;
   // Every loaded mention is unread and the server has more: the true number is at least this.
-  const unreadLabel = unreadMentions > 0 && unreadMentions === mentions.length && mentionFeed.hasMore ? `${unreadMentions}+` : String(unreadMentions);
+  const unreadLabel =
+    unreadMentions > 0 && unreadMentions === mentions.length && mentionFeed.hasMore ? `${unreadMentions}+` : String(unreadMentions);
   const mentionIds = useMemo(() => new Set(mentions.map((m) => m.message_id)), [mentions]);
   /** The oldest mention that has been loaded. For posts older than this, the server's list is not known here. */
   const oldestMentionId = useMemo(() => (mentions.length ? Math.min(...mentions.map((m) => m.message_id)) : 0), [mentions]);
@@ -161,7 +174,9 @@ export default function App() {
     serverKnown.current = info;
     // Keep the object already in use when nothing changed, so that nothing which depends on it starts over.
     setServer((known) =>
-      known !== null && known.passwordPolicy === info.passwordPolicy && known.email === info.email && known.board === info.board ? known : info,
+      known !== null && known.passwordPolicy === info.passwordPolicy && known.email === info.email && known.board === info.board
+        ? known
+        : info,
     );
     return info;
   }, []);
@@ -261,7 +276,10 @@ export default function App() {
     notify(summary);
     // A desktop notification reaches people who are looking at another window.
     if (document.hidden && currentAlertPermission() === "granted") {
-      new Notification("Brief!", { body: `${summary}: ${latest.message_text}`, tag: "brief-mention" });
+      new Notification("Brief!", {
+        body: `${summary}: ${latest.message_text}`,
+        tag: "brief-mention",
+      });
     }
   }, [myId, myToken, names, notify]);
 
@@ -293,7 +311,10 @@ export default function App() {
       if (!stillHere) return;
       if (outcome === "confirmed") {
         if (currentMember.current === null) {
-          setPageNotice({ text: "Your email address is confirmed. Sign in to post.", tone: "good" });
+          setPageNotice({
+            text: "Your email address is confirmed. Sign in to post.",
+            tone: "good",
+          });
           return;
         }
         // Someone is signed in here. Usually it is the member whose link this was; on a shared
@@ -308,14 +329,26 @@ export default function App() {
           if (!stillHere) return;
           setPageNotice(
             mine !== null && !mine.can_post
-              ? { text: "That email address is confirmed. It belongs to a different account from the one signed in here.", tone: "good" }
-              : { text: "Your email address is confirmed. You can post now.", tone: "good" },
+              ? {
+                  text: "That email address is confirmed. It belongs to a different account from the one signed in here.",
+                  tone: "good",
+                }
+              : {
+                  text: "Your email address is confirmed. You can post now.",
+                  tone: "good",
+                },
           );
         })();
       } else if (outcome === "refused") {
-        setPageNotice({ text: "That confirmation link has expired or was already used. Sign in to have a new one sent.", tone: "bad" });
+        setPageNotice({
+          text: "That confirmation link has expired or was already used. Sign in to have a new one sent.",
+          tone: "bad",
+        });
       } else {
-        setPageNotice({ text: "The server isn't responding, so the address could not be confirmed. Open the link in the mail again in a moment.", tone: "bad" });
+        setPageNotice({
+          text: "The server isn't responding, so the address could not be confirmed. Open the link in the mail again in a moment.",
+          tone: "bad",
+        });
       }
     });
     return () => {
@@ -323,6 +356,42 @@ export default function App() {
     };
     // Runs once: the link is read when the app starts, and loadServer never changes.
   }, [loadServer]);
+
+  // The page was opened from an invitation link (2.5): ask the server who sent it, then open "Create account".
+  useEffect(() => {
+    if (mailedLink?.kind !== "invite") return;
+    const secret = mailedLink.secret;
+    let stillHere = true;
+    api.lookupInvitation(secret).then(
+      (info) => {
+        if (!stillHere) return;
+        setInvitation({ secret, info });
+        if (currentMember.current !== null) {
+          setPageNotice({
+            text: `${info.inviter} invited someone to Brief! with this link. To use it for a new account, sign out first.`,
+            tone: "good",
+          });
+        }
+      },
+      (problem) => {
+        if (!stillHere) return;
+        setPageNotice(
+          problem instanceof NetworkError
+            ? {
+                text: "The server isn't responding, so the invitation could not be read. Open the link again in a moment.",
+                tone: "bad",
+              }
+            : {
+                text: "This invitation link no longer works: it was used, withdrawn, or it expired. Ask the person who invited you for a new one.",
+                tone: "bad",
+              },
+        );
+      },
+    );
+    return () => {
+      stillHere = false;
+    };
+  }, []);
 
   // A different member (or nobody) is signed in: start their mention state from scratch.
   useEffect(() => {
@@ -371,7 +440,10 @@ export default function App() {
   // and on the icon of the installed app, where the system supports that.
   useEffect(() => {
     document.title = unreadMentions > 0 ? `(${unreadLabel}) Brief!` : "Brief!";
-    const badge = navigator as Navigator & { setAppBadge?: (count?: number) => Promise<void>; clearAppBadge?: () => Promise<void> };
+    const badge = navigator as Navigator & {
+      setAppBadge?: (count?: number) => Promise<void>;
+      clearAppBadge?: () => Promise<void>;
+    };
     // Both calls can be missing (most browsers) or refused (no permission); neither matters to the page.
     if (unreadMentions > 0) void badge.setAppBadge?.(unreadMentions)?.catch(() => {});
     else void badge.clearAppBadge?.()?.catch(() => {});
@@ -384,7 +456,7 @@ export default function App() {
   }, []);
 
   function go(next: View) {
-    window.location.hash = next.kind === "user" ? `#/u/${next.accountId}` : next.kind === "mentions" ? "#/mentions" : "#/";
+    window.location.hash = next.kind === "user" ? `#/u/${next.accountId}` : next.kind === "all" ? "#/" : `#/${next.kind}`;
   }
 
   async function turnOnAlerts() {
@@ -403,7 +475,10 @@ export default function App() {
       setFeed((current) => {
         const onScreen = new Set(current.items.map((m) => m.message_id));
         const added = page.items.filter((m) => !onScreen.has(m.message_id));
-        return { items: [...current.items, ...added].sort(newestFirst), hasMore: page.hasMore };
+        return {
+          items: [...current.items, ...added].sort(newestFirst),
+          hasMore: page.hasMore,
+        };
       });
     } catch {
       notify("Older posts couldn't be loaded. Try again.");
@@ -422,7 +497,10 @@ export default function App() {
       setMentionFeed((current) => {
         const onScreen = new Set(current.items.map((m) => m.message_id));
         const added = page.items.filter((m) => !onScreen.has(m.message_id));
-        return { items: [...current.items, ...added].sort(newestFirst), hasMore: page.hasMore };
+        return {
+          items: [...current.items, ...added].sort(newestFirst),
+          hasMore: page.hasMore,
+        };
       });
     } catch {
       notify("Older mentions couldn't be loaded. Try again.");
@@ -432,6 +510,7 @@ export default function App() {
   }
 
   function signedIn(next: Session, isNewAccount: boolean, stay: boolean) {
+    if (isNewAccount) setInvitation(null); // used up
     setSession(next);
     saveSession(next, stay);
     notify(isNewAccount ? `Account created. Welcome, ${next.username}.` : `Signed in as ${next.username}`);
@@ -471,7 +550,11 @@ export default function App() {
     } else if (problem instanceof ApiError && problem.status === 403) {
       // 403 has two meanings: the post is someone else's, or this account's address is not confirmed yet. Look which.
       void loadProfile().then((mine) =>
-        notify(mine !== null && !mine.can_post ? "Confirm your email address first. The link is in your inbox." : "You can only change your own posts."),
+        notify(
+          mine !== null && !mine.can_post
+            ? "Confirm your email address first. The link is in your inbox."
+            : "You can only change your own posts.",
+        ),
       );
     } else if (problem instanceof NetworkError) {
       notify("The server isn't responding. Nothing was changed.");
@@ -486,7 +569,10 @@ export default function App() {
       const created = await api.createMessage(session, text);
       setNewId(created.message_id);
       if (viewedAccountId === null || viewedAccountId === session.account_id) {
-        setFeed((current) => ({ ...current, items: [created, ...current.items].sort(newestFirst) }));
+        setFeed((current) => ({
+          ...current,
+          items: [created, ...current.items].sort(newestFirst),
+        }));
       }
       notify("Posted");
       return true;
@@ -500,7 +586,10 @@ export default function App() {
     if (!session) return false;
     try {
       const updated = await api.updateMessage(session, messageId, text);
-      setFeed((current) => ({ ...current, items: current.items.map((m) => (m.message_id === messageId ? updated : m)) }));
+      setFeed((current) => ({
+        ...current,
+        items: current.items.map((m) => (m.message_id === messageId ? updated : m)),
+      }));
       notify("Saved");
       return true;
     } catch (problem) {
@@ -513,7 +602,10 @@ export default function App() {
     if (!session) return;
     try {
       await api.deleteMessage(session, messageId);
-      setFeed((current) => ({ ...current, items: current.items.filter((m) => m.message_id !== messageId) }));
+      setFeed((current) => ({
+        ...current,
+        items: current.items.filter((m) => m.message_id !== messageId),
+      }));
       notify("Deleted");
       // That was the last post on screen but the server has older ones: fetch them rather than show "nothing here".
       if (messages.length === 1 && feed.hasMore) void refresh();
@@ -521,6 +613,10 @@ export default function App() {
       explainWriteFailure(problem);
     }
   }
+
+  /** The two pages of 2.5 that replace the list of posts: "Invite people" (for the owner) and "Your account". */
+  const panel =
+    session === null ? null : view.kind === "invite" && profile?.is_owner ? "invite" : view.kind === "account" ? "account" : null;
 
   /** True on a board that shows nothing to visitors who are not signed in. */
   const closedToMe = session === null && server?.board === "closed";
@@ -530,17 +626,22 @@ export default function App() {
   const shown = showingMentions ? mentions : messages;
   const viewedName = viewedAccountId === null ? null : (names.get(viewedAccountId) ?? `user ${viewedAccountId}`);
   const viewingSelf = session !== null && viewedAccountId === session.account_id;
-  const heading = showingMentions
-    ? "Mentions of you"
-    : closedToMe
-      ? "Members only"
-      : session === null && server === null
-        ? "Brief!" // not known yet whether a visitor may read here: promise nothing
-        : viewedAccountId === null
-          ? "Everyone"
-          : viewingSelf
-            ? "Your posts"
-            : `Posts by ${viewedName}`;
+  const heading =
+    panel === "invite"
+      ? "Invite people"
+      : panel === "account"
+        ? "Your account"
+        : showingMentions
+          ? "Mentions of you"
+          : closedToMe
+            ? "Members only"
+            : session === null && server === null
+              ? "Brief!" // not known yet whether a visitor may read here: promise nothing
+              : viewedAccountId === null
+                ? "Everyone"
+                : viewingSelf
+                  ? "Your posts"
+                  : `Posts by ${viewedName}`;
 
   return (
     <div className="shell">
@@ -573,6 +674,16 @@ export default function App() {
               <button type="button" className="btn btn-quiet" onClick={() => go({ kind: "user", accountId: session.account_id })}>
                 Your posts
               </button>
+              {profile?.is_owner && (
+                <button type="button" className="btn btn-quiet" onClick={() => go({ kind: "invite" })}>
+                  Invite people
+                </button>
+              )}
+              {profile && (
+                <button type="button" className="btn btn-quiet" onClick={() => go({ kind: "account" })}>
+                  Your account
+                </button>
+              )}
               <button type="button" className="btn btn-quiet" onClick={() => void signOut()}>
                 Sign out
               </button>
@@ -580,6 +691,8 @@ export default function App() {
           </section>
         ) : (
           <AuthPanel
+            key={invitation?.secret ?? "no-invitation"}
+            invitation={invitation}
             onSignedIn={signedIn}
             takenUsernames={loadState === "ready" && !closedToMe ? takenUsernames : null}
             server={server}
@@ -600,6 +713,8 @@ export default function App() {
         </p>
         <p className="rail-links">
           <a href="/docs/index.html">API docs</a>
+          <a href="/terms.html">Terms</a>
+          <a href="/privacy.html">Privacy</a>
         </p>
         {!session && (
           <p className="rail-also">
@@ -647,111 +762,133 @@ export default function App() {
           </p>
         )}
 
-        {session && profile && (
-          <EmailStatus
-            key={session.account_id}
+        {session && panel === "invite" ? (
+          <InvitePanel session={session} onSessionEnded={() => endSession("Your session ended. Sign in again.")} />
+        ) : session && panel === "account" ? (
+          <AccountPanel
             session={session}
             profile={profile}
-            onProfile={setProfile}
+            onDeleted={() => {
+              go({ kind: "all" });
+              endSession("Your account and your posts were deleted.");
+            }}
             onSessionEnded={() => endSession("Your session ended. Sign in again.")}
-            onReload={() => void loadProfile()}
           />
-        )}
-
-        {session ? (
-          <Composer username={session.username} onPost={post} blocked={postingBlocked} />
-        ) : closedToMe || server === null ? null : (
-          <p className="signin-nudge">Reading is open to everyone. Sign in to post.</p>
-        )}
-
-        {showingMentions && alertPermission !== "unsupported" && (
-          <p className="alerts">
-            {alertPermission === "granted" ? (
-              "Desktop alerts are on. You'll be told about new mentions while Brief! is open in a tab."
-            ) : alertPermission === "denied" ? (
-              "Desktop alerts are blocked for this site in your browser settings."
-            ) : (
-              <>
-                Want to know when you're mentioned while you work in another window?{" "}
-                <button type="button" className="link" onClick={() => void turnOnAlerts()}>
-                  Turn on desktop alerts
-                </button>
-              </>
-            )}
-          </p>
-        )}
-
-        {loadState === "offline" ? (
-          <div className="notice" role="alert">
-            <p className="notice-title">{window.navigator.onLine ? "The server isn't responding." : "You're offline."}</p>
-            <p>
-              {!window.navigator.onLine
-                ? "Posts will load again when your connection is back."
-                : onOwnMachine
-                  ? "Start the API (it listens on port 8080), then refresh."
-                  : "It may be starting up. Try again in a moment."}
-            </p>
-            <button type="button" className="btn btn-primary" onClick={() => void refresh()}>
-              Try again
-            </button>
-          </div>
-        ) : loadState === "loading" && shown.length === 0 ? (
-          <p className="quiet">{session === null && server === null ? "Connecting…" : "Loading posts…"}</p>
-        ) : closedToMe ? (
-          <div className="notice">
-            <p className="notice-title">This board is for invited members.</p>
-            <p>Sign in to read and post. To join, you need an invitation code from the person who runs this board.</p>
-          </div>
-        ) : shown.length === 0 ? (
-          <div className="notice">
-            <p className="notice-title">
-              {showingMentions
-                ? "No one has mentioned you yet."
-                : viewedAccountId === null
-                  ? "Nothing here yet."
-                  : viewingSelf
-                    ? "You haven't posted yet."
-                    : `${viewedName} hasn't posted yet.`}
-            </p>
-            <p>
-              {showingMentions
-                ? `When someone writes "${session?.username}" in a post, it appears here.`
-                : session
-                  ? "Write the first post in the box above."
-                  : "Sign in and write the first post."}
-            </p>
-          </div>
         ) : (
           <>
-            <ol className="feed" aria-label={heading}>
-              {shown.map((message) => (
-                <MessageItem
-                  key={message.message_id}
-                  message={message}
-                  authorName={names.get(message.posted_by) ?? `user ${message.posted_by}`}
-                  accounts={accounts}
-                  isOwn={session?.account_id === message.posted_by}
-                  isNew={message.message_id === newId}
-                  mentionsYou={mentionsMe(message)}
-                  onOpenAuthor={(accountId) => go({ kind: "user", accountId })}
-                  onSave={save}
-                  onDelete={remove}
-                />
-              ))}
-            </ol>
-            {!showingMentions && feed.hasMore && (
-              <p className="feed-more">
-                <button type="button" className="btn btn-quiet" disabled={loadingOlder} onClick={() => void loadOlder()}>
-                  {loadingOlder ? "Loading…" : "Show older posts"}
-                </button>
+            {session && profile && (
+              <EmailStatus
+                key={session.account_id}
+                session={session}
+                profile={profile}
+                onProfile={setProfile}
+                onSessionEnded={() => endSession("Your session ended. Sign in again.")}
+                onReload={() => void loadProfile()}
+              />
+            )}
+
+            {session ? (
+              // While the address waits for confirmation, the "Check your email" step above takes the composer's place.
+              postingBlocked === null && <Composer username={session.username} onPost={post} blocked={postingBlocked} />
+            ) : closedToMe || server === null ? null : (
+              <p className="signin-nudge">Reading is open to everyone. Sign in to post.</p>
+            )}
+
+            {showingMentions && alertPermission !== "unsupported" && (
+              <p className="alerts">
+                {alertPermission === "granted" ? (
+                  "Desktop alerts are on. You'll be told about new mentions while Brief! is open in a tab."
+                ) : alertPermission === "denied" ? (
+                  "Desktop alerts are blocked for this site in your browser settings."
+                ) : (
+                  <>
+                    Want to know when you're mentioned while you work in another window?{" "}
+                    <button type="button" className="link" onClick={() => void turnOnAlerts()}>
+                      Turn on desktop alerts
+                    </button>
+                  </>
+                )}
               </p>
             )}
-            {showingMentions && mentionFeed.hasMore && (
-              <p className="feed-more">
-                <button type="button" className="btn btn-quiet" disabled={loadingOlderMentions} onClick={() => void loadOlderMentions()}>
-                  {loadingOlderMentions ? "Loading…" : "Show older mentions"}
+
+            {loadState === "offline" ? (
+              <div className="notice" role="alert">
+                <p className="notice-title">{window.navigator.onLine ? "The server isn't responding." : "You're offline."}</p>
+                <p>
+                  {!window.navigator.onLine
+                    ? "Posts will load again when your connection is back."
+                    : onOwnMachine
+                      ? "Start the API (it listens on port 8080), then refresh."
+                      : "It may be starting up. Try again in a moment."}
+                </p>
+                <button type="button" className="btn btn-primary" onClick={() => void refresh()}>
+                  Try again
                 </button>
-              </p>
+              </div>
+            ) : loadState === "loading" && shown.length === 0 ? (
+              <p className="quiet">{session === null && server === null ? "Connecting…" : "Loading posts…"}</p>
+            ) : closedToMe ? (
+              <div className="notice">
+                <p className="notice-title">This board is for invited members.</p>
+                <p>Sign in to read and post. To join, ask the person who runs this board to invite you.</p>
+              </div>
+            ) : shown.length === 0 ? (
+              <div className="notice">
+                <p className="notice-title">
+                  {showingMentions
+                    ? "No one has mentioned you yet."
+                    : viewedAccountId === null
+                      ? "Nothing here yet."
+                      : viewingSelf
+                        ? "You haven't posted yet."
+                        : `${viewedName} hasn't posted yet.`}
+                </p>
+                <p>
+                  {showingMentions
+                    ? `When someone writes "${session?.username}" in a post, it appears here.`
+                    : session
+                      ? "Write the first post in the box above."
+                      : "Sign in and write the first post."}
+                </p>
+              </div>
+            ) : (
+              <>
+                <ol className="feed" aria-label={heading}>
+                  {shown.map((message) => (
+                    <MessageItem
+                      key={message.message_id}
+                      message={message}
+                      authorName={names.get(message.posted_by) ?? `user ${message.posted_by}`}
+                      accounts={accounts}
+                      isOwn={session?.account_id === message.posted_by}
+                      isNew={message.message_id === newId}
+                      mentionsYou={mentionsMe(message)}
+                      onOpenAuthor={(accountId) => go({ kind: "user", accountId })}
+                      onSave={save}
+                      onDelete={remove}
+                    />
+                  ))}
+                </ol>
+                {!showingMentions && feed.hasMore && (
+                  <p className="feed-more">
+                    <button type="button" className="btn btn-quiet" disabled={loadingOlder} onClick={() => void loadOlder()}>
+                      {loadingOlder ? "Loading…" : "Show older posts"}
+                    </button>
+                  </p>
+                )}
+                {showingMentions && mentionFeed.hasMore && (
+                  <p className="feed-more">
+                    <button
+                      type="button"
+                      className="btn btn-quiet"
+                      disabled={loadingOlderMentions}
+                      onClick={() => void loadOlderMentions()}
+                    >
+                      {loadingOlderMentions ? "Loading…" : "Show older mentions"}
+                    </button>
+                  </p>
+                )}
+              </>
             )}
           </>
         )}

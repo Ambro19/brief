@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
  *
  *     https://briefmessage.net/?verify=<secret>     confirm an email address
  *     https://briefmessage.net/?reset=<secret>      choose a new password
+ *     https://briefmessage.net/?invite=<secret>     create an account on a closed board (2.5)
  *
  * Where the links point is configuration (brief.public-url, environment variable
  * BRIEF_PUBLIC_URL), never the Host header of the request that asked for the mail. A request
@@ -39,6 +40,23 @@ public class AccountMails {
                         + publicUrl + "/?verify=" + secret + "\n\n"
                         + "The link works once, for 24 hours. Until you have used it you can read on Brief! but not post.\n\n"
                         + "If you did not create an account on Brief!, you can ignore this message.\n"));
+    }
+
+    /** The address of an invitation link (2.5). */
+    public String invitationLink(String secret) {
+        return publicUrl + "/?invite=" + secret;
+    }
+
+    /** An invitation to join the board (2.5). */
+    public void sendInvitation(String to, String inviterName, String secret, long days) {
+        mailer.send(new Mail(to, inviterName + " invited you to Brief!",
+                "Hello,\n\n"
+                        + inviterName + " has invited you to Brief!, a small message board where every post fits in 255 characters.\n\n"
+                        + "To create your account, open this link:\n\n"
+                        + invitationLink(secret) + "\n\n"
+                        + "The link works once, for " + (days == 1 ? "one day" : days + " days") + ". "
+                        + "Your account will use this email address, already confirmed.\n\n"
+                        + "If you do not know " + inviterName + ", you can ignore this message: nothing happens unless you open the link.\n"));
     }
 
     public void sendPasswordReset(String to, String username, String secret) {

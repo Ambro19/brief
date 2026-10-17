@@ -39,7 +39,10 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
   const [later, setLater] = useState(() => askedForLater(session.account_id));
   const [busy, setBusy] = useState(false);
   /** The line under the panel: what the last action did. */
-  const [note, setNote] = useState<{ text: string; tone: "good" | "bad" } | null>(null);
+  const [note, setNote] = useState<{
+    text: string;
+    tone: "good" | "bad";
+  } | null>(null);
 
   const hasAddress = profile.email !== null;
   if (hasAddress && profile.email_verified) return null;
@@ -47,14 +50,21 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
 
   function failed(problem: unknown, otherwise: string) {
     if (problem instanceof ApiError && problem.status === 401) onSessionEnded();
-    else if (problem instanceof NetworkError) setNote({ text: "The server isn't responding. Try again in a moment.", tone: "bad" });
+    else if (problem instanceof NetworkError)
+      setNote({
+        text: "The server isn't responding. Try again in a moment.",
+        tone: "bad",
+      });
     else setNote({ text: otherwise, tone: "bad" });
   }
 
   async function saveAddress() {
     const address = email.trim();
     if (!looksLikeEmail(address)) {
-      setNote({ text: "Enter an email address like name@example.com.", tone: "bad" });
+      setNote({
+        text: "Enter an email address like name@example.com.",
+        tone: "bad",
+      });
       return;
     }
     setBusy(true);
@@ -76,10 +86,16 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
     setNote(null);
     try {
       await api.resendVerification(session.token);
-      setNote({ text: "Sent again. Only the newest link works.", tone: "good" });
+      setNote({
+        text: "Sent again. Only the newest link works.",
+        tone: "good",
+      });
     } catch (problem) {
       if (problem instanceof ApiError && problem.status === 429) {
-        setNote({ text: "A link was sent less than a minute ago. Give it a moment, then try again.", tone: "bad" });
+        setNote({
+          text: "A link was sent less than a minute ago. Give it a moment, then try again.",
+          tone: "bad",
+        });
       } else if (problem instanceof ApiError && problem.status === 400) {
         onReload(); // nothing is waiting to be confirmed any more: the address was confirmed somewhere else
       } else {
@@ -102,20 +118,27 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
   const showForm = !hasAddress || editing;
 
   return (
-    <section className="banner" aria-label="Your email address">
+    <section className={hasAddress ? "banner banner-check" : "banner"} aria-label="Your email address">
       {hasAddress ? (
         <>
-          <p className="banner-title">Confirm your email address</p>
+          {/* 2.5: a full step of its own, in place of the post box, rather than a strip above it. */}
+          <svg className="check-icon" viewBox="0 0 48 48" aria-hidden="true">
+            <rect x="5" y="11" width="38" height="27" rx="5" fill="none" stroke="currentColor" strokeWidth="3" />
+            <path d="M7 14l17 13 17-13" fill="none" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
+          </svg>
+          <p className="banner-title">Check your email</p>
           <p>
-            We mailed a link to <strong>{profile.email}</strong>. Until you open it you can read, but not post. The link works once, for 24 hours.
+            We sent a link to <strong>{profile.email}</strong>. Open it to confirm the address, and you can post. Until then you can read
+            everything here. The link works once, for 24 hours.
           </p>
+          <p className="field-note">Nothing after a few minutes? Look in the spam folder, or send the link again.</p>
         </>
       ) : (
         <>
           <p className="banner-title">Add an email address</p>
           <p>
-            It is your way back in if you forget your password, and other members never see it. We'll mail you a link to confirm it; posting waits
-            until you have opened that link.
+            It is your way back in if you forget your password, and other members never see it. We'll mail you a link to confirm it; posting
+            waits until you have opened that link.
           </p>
         </>
       )}
@@ -156,6 +179,9 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
         </form>
       ) : (
         <p className="banner-actions">
+          <button type="button" className="btn btn-primary" onClick={onReload}>
+            I've opened it
+          </button>
           <button type="button" className="link" disabled={busy} onClick={() => void sendAgain()}>
             Send the link again
           </button>

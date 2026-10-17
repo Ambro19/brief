@@ -81,6 +81,7 @@ public abstract class ApiTestBase {
         loginRateLimiter.reset();
         mailbox().clear();
         jdbc.execute("delete from account_token");
+        jdbc.execute("delete from invitation");
         jdbc.execute("delete from mention");
         jdbc.execute("delete from message");
         jdbc.execute("delete from account");
@@ -89,6 +90,7 @@ public abstract class ApiTestBase {
         jdbc.execute("alter table message alter column message_id restart with 1");
         jdbc.execute("alter table account alter column account_id restart with 1");
         jdbc.execute("alter table account_token alter column token_id restart with 1");
+        jdbc.execute("alter table invitation alter column invitation_id restart with 1");
         // The seed password is plain text on purpose: it exercises the "upgrade to a hash on first login" path.
         // username_key is the lower-case form the application compares names by (Account.keyOf).
         // The row has no email address: it stands for an account from before 2.4.
@@ -172,10 +174,11 @@ public abstract class ApiTestBase {
         return "{\"username\":\"" + username + "\",\"password\":\"" + password + "\",\"email\":\"" + email + "\"}";
     }
 
-    /** As above, with an invitation code, for a closed board. */
-    protected static String registrationJson(String username, String password, String email, String inviteCode) {
-        return "{\"username\":\"" + username + "\",\"password\":\"" + password + "\",\"email\":\"" + email
-                + "\",\"invite_code\":\"" + inviteCode + "\"}";
+    /** As above, with the secret of an invitation link (2.5). A null email leaves the field out. */
+    protected static String registrationJson(String username, String password, String email, String invitation) {
+        return "{\"username\":\"" + username + "\",\"password\":\"" + password + "\""
+                + (email == null ? "" : ",\"email\":\"" + email + "\"")
+                + ",\"invitation\":\"" + invitation + "\"}";
     }
 
     protected static String emailJson(String email) {
@@ -199,7 +202,7 @@ public abstract class ApiTestBase {
     }
 
     /**
-     * The secret of the newest link of this kind ("verify" or "reset") mailed to this address.
+     * The secret of the newest link of this kind ("verify", "reset" or "invite") mailed to this address.
      * Fails the test if no such mail was sent.
      */
     protected String secretMailedTo(String email, String kind) {

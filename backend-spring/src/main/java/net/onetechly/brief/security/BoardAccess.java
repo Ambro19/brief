@@ -1,68 +1,63 @@
 package net.onetechly.brief.security;
 
-import net.onetechly.brief.util.PasswordHasher;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.util.Locale;
+
 /**
- * Whether the board is open to everyone or closed to invited people (2.4).
+ * Whether the board is open to everyone or closed to invited people.
  *
  *   open (the default):  anyone may read, and anyone may create an account.
- *   closed:              creating an account needs the invitation code, and reading needs a
- *                        sign-in. The web app itself and the API documentation stay public;
- *                        what is protected is what members wrote and who they are.
+ *   closed:              creating an account needs an invitation, and reading needs a sign-in.
+ *                        The web app itself, the API documentation and the mailed links stay
+ *                        public; what is protected is what members wrote and who they are.
  *
- * The board is closed when the property brief.invite-code (environment variable
- * BRIEF_INVITE_CODE) holds a code. The code is a shared secret: whoever has it can join. Give
- * it to the people you invite, and change it on the server to stop new sign-ups with the old one.
+ * The setting is brief.board (environment variable BRIEF_BOARD): "open" or "closed".
  *
- * Closed mode builds on login tokens, so it needs strict mode. A code together with compat
- * mode stops the application at start-up: starting anyway would look closed and be open.
+ * History. In 2.4 a board was closed by setting a shared invitation code (BRIEF_INVITE_CODE)
+ * that every newcomer had to type. In 2.5 newcomers are invited by link instead, and the code
+ * is no longer asked for anywhere. A server whose environment still holds BRIEF_INVITE_CODE and
+ * no BRIEF_BOARD is treated as closed, so that the upgrade can never open a board by accident;
+ * the start-up log then asks for BRIEF_BOARD=closed in its place.
+ *
+ * Closed mode builds on login tokens, so it needs strict mode. Closed together with compat mode
+ * stops the application at start-up: starting anyway would look closed and be open.
  */
 @Component
 public class BoardAccess {
 
-    /** A shorter code could be found by trying, even with the attempt limit in front of it. */
-    public static final int MIN_CODE_LENGTH = 8;
+    private final boolean closed;
+    private final boolean closedByOldCode;
 
-    /** The code, or null when the board is open. */
-    private final String inviteCode;
-
-    public BoardAccess(AuthMode mode, @Value("${brief.invite-code:}") String inviteCode) {
-        String code = inviteCode == null ? "" : inviteCode.trim();
-        if (code.isEmpty()) {
-            this.inviteCode = null;
-            return;
+    public BoardAccess(AuthMode mode,
+                       @Value("${brief.board:}") String board,
+                       @Value("${brief.invite-code:}") String oldInviteCode) {
+        String setting = board == null ? "" : board.trim().toLowerCase(Locale.ROOT);
+        boolean oldCodeSet = oldInviteCode != null && !oldInviteCode.isBlank();
+        switch (setting) {
+            case "closed" -> { closed = true; closedByOldCode = false; }
+            case "open" -> { closed = false; closedByOldCode = false; }
+            case "" -> { closed = oldCodeSet; closedByOldCode = oldCodeSet; }
+            default -> throw new IllegalStateException("BRIEF_BOARD (brief.board) must be \"open\" or \"closed\"");
         }
-        if (!mode.isStrict()) {
-            throw new IllegalStateException("BRIEF_INVITE_CODE (brief.invite-code) is set, but the application runs in "
-                    + "compat mode, where nobody has to sign in. A closed board needs BRIEF_AUTH_MODE=strict.");
+        if (closed && !mode.isStrict()) {
+            throw new IllegalStateException("The board is closed, but the application runs in compat mode, where nobody "
+                    + "has to sign in. A closed board needs BRIEF_AUTH_MODE=strict.");
         }
-        if (code.length() < MIN_CODE_LENGTH) {
-            throw new IllegalStateException("BRIEF_INVITE_CODE (brief.invite-code) must be at least "
-                    + MIN_CODE_LENGTH + " characters long");
-        }
-        this.inviteCode = code;
     }
 
     public boolean isClosed() {
-        return inviteCode != null;
+        return closed;
+    }
+
+    /** True if the board is closed only because the 2.4 setting BRIEF_INVITE_CODE is still there. */
+    public boolean isClosedByOldCode() {
+        return closedByOldCode;
     }
 
     /** "closed" or "open". The web app reads this from GET /health. */
     public String name() {
-        return isClosed() ? "closed" : "open";
-    }
-
-    /**
-     * True if this caller may create an account: always on an open board, and on a closed one
-     * only with the right code. The comparison takes the same time wherever the first wrong
-     * character is, so the response time does not reveal how much of a guess was right.
-     */
-    public boolean admits(String offeredCode) {
-        if (inviteCode == null) {
-            return true;
-        }
-        return offeredCode != null && PasswordHasher.constantTimeEquals(inviteCode, offeredCode.trim());
+        return closed ? "closed" : "open";
     }
 }

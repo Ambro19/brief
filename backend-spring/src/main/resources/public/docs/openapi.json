@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Brief! API",
-    "version": "2.4.0",
-    "description": "Backend for **Brief!**, a message board where every post fits in 255 characters.\n\nThe same API is served by two editions of the backend: **Javalin + JDBC** (`backend/`) and **Spring Boot + Spring Security + Spring Data JPA** (`backend-spring/`).\n\n**How errors work:** error responses have an empty body. The status code carries the meaning.\n\n**How to try the protected endpoints here:**\n1. Run `POST /register` to create an account (or use one you already have).\n2. Run `POST /login`. In the response headers, copy the value of `x-auth-token`.\n3. Click **Authorize** at the top right, paste the token, and confirm.\n4. Now `POST`, `PATCH` and `DELETE` on `/messages` will work, as that account.\n\nThe app runs in *strict* mode by default: you can only post as yourself and only change your own posts. Set the environment variable `BRIEF_AUTH_MODE=compat` before starting to get the original training contract, where no token is needed.\n\n**New in 2.1 (Spring Boot edition only):** the login token is a signed JWT; `GET /messages` and `GET /accounts/{account_id}/messages` can be read a page at a time with `limit` and `before`; in strict mode new passwords must be strong and repeated failed logins answer `429`. The Javalin edition ignores the paging parameters and always returns the full list.\n\n**New in 2.2 (Spring Boot edition only):** mentions are stored in their own indexed table when a post is saved or edited, so `GET /accounts/{account_id}/mentions` is a look-up and no longer searches every post.\n\n**New in 2.3 (Spring Boot edition only):** `GET /accounts/{account_id}/mentions` can be read a page at a time with `limit` and `before`, like the other lists; a username is one name whatever its capitals, for registering and for signing in; in strict mode a new username must be 3 to 30 letters, digits, dots, dashes or underscores. The database schema is created by versioned Flyway migrations, and the application runs on PostgreSQL as well as H2.\n\n**New in 2.4 (Spring Boot edition only):** an account has an email address. In strict mode a new account must give one, and can read but not post until the link mailed to it has been opened (`POST /email/verify`). A forgotten password is replaced through a mailed link (`POST /password/forgot`, `POST /password/reset`). An address is shown only to its own account (`GET /me`). A board can be **closed** by setting `BRIEF_INVITE_CODE`: creating an account then needs that code, and every `GET` of posts and members needs a login token. `GET /health` reports `email` and `board`, so a client knows which of this applies."
+    "version": "2.5.0",
+    "description": "Backend for **Brief!**, a message board where every post fits in 255 characters.\n\nThe same API is served by two editions of the backend: **Javalin + JDBC** (`backend/`) and **Spring Boot + Spring Security + Spring Data JPA** (`backend-spring/`).\n\n**How errors work:** error responses have an empty body. The status code carries the meaning.\n\n**How to try the protected endpoints here:**\n1. Run `POST /register` to create an account (or use one you already have).\n2. Run `POST /login`. In the response headers, copy the value of `x-auth-token`.\n3. Click **Authorize** at the top right, paste the token, and confirm.\n4. Now `POST`, `PATCH` and `DELETE` on `/messages` will work, as that account.\n\nThe app runs in *strict* mode by default: you can only post as yourself and only change your own posts. Set the environment variable `BRIEF_AUTH_MODE=compat` before starting to get the original training contract, where no token is needed.\n\n**New in 2.1 (Spring Boot edition only):** the login token is a signed JWT; `GET /messages` and `GET /accounts/{account_id}/messages` can be read a page at a time with `limit` and `before`; in strict mode new passwords must be strong and repeated failed logins answer `429`. The Javalin edition ignores the paging parameters and always returns the full list.\n\n**New in 2.2 (Spring Boot edition only):** mentions are stored in their own indexed table when a post is saved or edited, so `GET /accounts/{account_id}/mentions` is a look-up and no longer searches every post.\n\n**New in 2.3 (Spring Boot edition only):** `GET /accounts/{account_id}/mentions` can be read a page at a time with `limit` and `before`, like the other lists; a username is one name whatever its capitals, for registering and for signing in; in strict mode a new username must be 3 to 30 letters, digits, dots, dashes or underscores. The database schema is created by versioned Flyway migrations, and the application runs on PostgreSQL as well as H2.\n\n**New in 2.4 (Spring Boot edition only):** an account has an email address. In strict mode a new account must give one, and can read but not post until the link mailed to it has been opened (`POST /email/verify`). A forgotten password is replaced through a mailed link (`POST /password/forgot`, `POST /password/reset`). An address is shown only to its own account (`GET /me`). A board can be **closed** (`BRIEF_BOARD=closed`; in 2.4 `BRIEF_INVITE_CODE`): creating an account then needs an invitation, and every `GET` of posts and members needs a login token. `GET /health` reports `email` and `board`, so a client knows which of this applies.\n\n**New in 2.5 (Spring Boot edition only):** newcomers to a closed board join through **invitation links** that the board owner (`BRIEF_OWNER_USERNAME`) mails (`POST /invitations`) or passes on (`POST /invitations/link`). The link opens the web app at `/?invite=<secret>`; `POST /invitations/lookup` tells who sent it, and `POST /register` with `\"invitation\"` uses it. A mailed invitation creates the account with its address already confirmed. The shared code of 2.4 is no longer asked for. A member can delete their account and posts (`POST /accounts/{account_id}/deletion`). `GET /me` reports `is_owner`."
   },
   "servers": [
     {
@@ -19,6 +19,10 @@
     {
       "name": "account email",
       "description": "Confirm an email address, and get back into an account (2.4, Spring Boot edition)"
+    },
+    {
+      "name": "invitations",
+      "description": "Invite people to a closed board (2.5, Spring Boot edition)"
     },
     {
       "name": "messages",
@@ -37,7 +41,7 @@
         ],
         "summary": "Create an account",
         "operationId": "register",
-        "description": "Succeeds only if the username is allowed, the password meets the rule, and the username is not taken. The password is stored as a salted hash.\n\nUsername rule: not blank. In the Spring Boot edition in strict mode (since 2.3): 3 to 30 characters, each a letter a-z or A-Z, a digit, a dot, a dash or an underscore.\n\nSince 2.3 (Spring Boot edition) a username is one name whatever its capitals: if `Maya` exists, `maya` and `MAYA` are taken. The name is stored and shown as it was typed.\n\nPassword rule: at least 4 characters. In the Spring Boot edition in strict mode: at least 8 characters, with at least one letter and one digit, and not the same as the username. `GET /health` reports which rule applies.\n\nSince 2.4 (Spring Boot edition): in strict mode an `email` is required and must not belong to another account. A link is mailed to it; until it is used the account can sign in and read, and cannot post. On a closed board (`GET /health` says `\"board\": \"closed\"`) the request must carry the right `invite_code`; without it the answer is `403` whatever else the request holds, and five wrong codes from one address lock that address out for 15 minutes.",
+        "description": "Succeeds only if the username is allowed, the password meets the rule, and the username is not taken. The password is stored as a salted hash.\n\nUsername rule: not blank. In the Spring Boot edition in strict mode (since 2.3): 3 to 30 characters, each a letter a-z or A-Z, a digit, a dot, a dash or an underscore.\n\nSince 2.3 (Spring Boot edition) a username is one name whatever its capitals: if `Maya` exists, `maya` and `MAYA` are taken. The name is stored and shown as it was typed.\n\nPassword rule: at least 4 characters. In the Spring Boot edition in strict mode: at least 8 characters, with at least one letter and one digit, and not the same as the username. `GET /health` reports which rule applies.\n\nSince 2.4 (Spring Boot edition): in strict mode an `email` is required and must not belong to another account. A link is mailed to it; until it is used the account can sign in and read, and cannot post.\n\nSince 2.5: on a closed board (`GET /health` says `\"board\": \"closed\"`) the request must carry a usable `invitation`; without one the answer is `403` whatever else the request holds, and five bad ones from one address lock that address out for 15 minutes. A mailed invitation fixes the address and confirms it: no confirmation mail is sent.",
         "requestBody": {
           "required": true,
           "content": {
@@ -70,13 +74,13 @@
             }
           },
           "400": {
-            "description": "Invalid input, a username, password or email address that does not meet the rule, or a username (in any capitals) or email address that is already taken. Empty body."
+            "description": "Invalid input, a username, password or email address that does not meet the rule, or a username (in any capitals) or email address that is already taken. Empty body. Since 2.5 also: an address other than the one a mailed invitation was sent to."
           },
           "403": {
-            "description": "Closed board: the invitation code is missing or wrong. Empty body."
+            "description": "Closed board: no invitation, or one that was used, withdrawn or expired (on an open board: a given invitation that is not usable). Empty body."
           },
           "429": {
-            "description": "Closed board: too many wrong invitation codes from this address. `Retry-After` says how many seconds to wait. Empty body."
+            "description": "Too many bad invitations from this address. `Retry-After` says how many seconds to wait. Empty body."
           }
         }
       }
@@ -912,6 +916,260 @@
         }
       }
     },
+    "/invitations": {
+      "post": {
+        "tags": [
+          "invitations"
+        ],
+        "summary": "Mail an invitation",
+        "operationId": "invite",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Since 2.5 (Spring Boot edition). For the board owner (`BRIEF_OWNER_USERNAME`) only; needs a token in every mode. Mails a link that works once, for 7 days (`BRIEF_INVITATION_DAYS`). An earlier unused invitation to the same address stops working.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailAddress"
+              },
+              "example": {
+                "email": "maya@example.com"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The invitation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not an address, or the address already belongs to a member. Empty body."
+          },
+          "401": {
+            "description": "Missing, unknown or expired token. Empty body."
+          },
+          "403": {
+            "description": "The caller does not run the board. Empty body."
+          },
+          "429": {
+            "description": "50 invitations in 24 hours. `Retry-After` says how many seconds to wait. Empty body."
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "invitations"
+        ],
+        "summary": "List the invitations sent",
+        "operationId": "listInvitations",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Since 2.5 (Spring Boot edition). For the board owner (`BRIEF_OWNER_USERNAME`) only; needs a token in every mode. Newest first. The secrets are never shown again.",
+        "responses": {
+          "200": {
+            "description": "The invitations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InvitationView"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, unknown or expired token. Empty body."
+          },
+          "403": {
+            "description": "The caller does not run the board. Empty body."
+          }
+        }
+      }
+    },
+    "/invitations/link": {
+      "post": {
+        "tags": [
+          "invitations"
+        ],
+        "summary": "Make an invitation link to pass on",
+        "operationId": "createInvitationLink",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Since 2.5 (Spring Boot edition). For the board owner (`BRIEF_OWNER_USERNAME`) only; needs a token in every mode. Nothing is mailed; the answer holds the link, this once. The newcomer gives an address when joining and confirms it as usual.",
+        "responses": {
+          "200": {
+            "description": "The link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationLink"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, unknown or expired token. Empty body."
+          },
+          "403": {
+            "description": "The caller does not run the board. Empty body."
+          },
+          "429": {
+            "description": "50 invitations in 24 hours. Empty body."
+          }
+        }
+      }
+    },
+    "/invitations/{invitation_id}": {
+      "delete": {
+        "tags": [
+          "invitations"
+        ],
+        "summary": "Withdraw an invitation",
+        "operationId": "withdrawInvitation",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Since 2.5 (Spring Boot edition). For the board owner (`BRIEF_OWNER_USERNAME`) only; needs a token in every mode. Its link stops working at once.",
+        "parameters": [
+          {
+            "name": "invitation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Withdrawn. Empty body."
+          },
+          "400": {
+            "description": "It was used already. Empty body."
+          },
+          "401": {
+            "description": "Missing, unknown or expired token. Empty body."
+          },
+          "403": {
+            "description": "The caller does not run the board. Empty body."
+          },
+          "404": {
+            "description": "No such invitation of the caller. Empty body."
+          }
+        }
+      }
+    },
+    "/invitations/lookup": {
+      "post": {
+        "tags": [
+          "invitations"
+        ],
+        "summary": "Read an invitation link",
+        "operationId": "lookupInvitation",
+        "description": "Since 2.5 (Spring Boot edition). Needs no sign-in: holding the link is the proof. Tells who sent it, to which address, and until when.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkSecret"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The invitation can be used.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown, used, withdrawn or expired. Empty body."
+          },
+          "429": {
+            "description": "Too many bad invitations from this address. Empty body."
+          }
+        }
+      }
+    },
+    "/accounts/{account_id}/deletion": {
+      "post": {
+        "tags": [
+          "account email"
+        ],
+        "summary": "Delete your account",
+        "operationId": "deleteAccount",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Since 2.5 (Spring Boot edition). Deletes the account and every post it wrote, at once. Needs a token in every mode, and the password again. Wrong passwords are counted with sign-ins. The board owner cannot delete their account.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Password"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deleted. Empty body."
+          },
+          "400": {
+            "description": "No password in the request, or the account runs the board. Empty body."
+          },
+          "401": {
+            "description": "Missing, unknown or expired token. Empty body."
+          },
+          "403": {
+            "description": "Another account, or a wrong password. Empty body."
+          },
+          "429": {
+            "description": "Too many wrong passwords. `Retry-After` says how many seconds to wait. Empty body."
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -963,7 +1221,7 @@
             }
           }
         },
-        "description": "`password_policy` is sent by the Spring Boot edition: `strong` in strict mode, `basic` in compat mode. Since 2.4 it also sends `email` (`required` in strict mode, `optional` in compat mode) and `board` (`closed` when an invitation code is set, otherwise `open`). The Javalin edition sends only `status`. This endpoint is public on a closed board too."
+        "description": "`password_policy` is sent by the Spring Boot edition: `strong` in strict mode, `basic` in compat mode. Since 2.4 it also sends `email` (`required` in strict mode, `optional` in compat mode) and `board` (`closed` or `open`, from `BRIEF_BOARD`). The Javalin edition sends only `status`. This endpoint is public on a closed board too."
       }
     }
   },
@@ -1102,9 +1360,9 @@
             "maxLength": 254,
             "description": "Since 2.4 (Spring Boot edition). Required in strict mode, optional in compat mode. Stored in lower case. Do not send it to the Javalin edition."
           },
-          "invite_code": {
+          "invitation": {
             "type": "string",
-            "description": "Since 2.4 (Spring Boot edition). Needed on a closed board, ignored on an open one."
+            "description": "Since 2.5 (Spring Boot edition). The secret from an invitation link (the text after `?invite=`). Needed on a closed board; optional on an open one, but refused (403) if given and not usable. With a mailed invitation `email` may be left out, and must otherwise be the invited address."
           }
         }
       },
@@ -1128,6 +1386,10 @@
           "can_post": {
             "type": "boolean",
             "description": "false in strict mode while an address is waiting to be confirmed."
+          },
+          "is_owner": {
+            "type": "boolean",
+            "description": "Since 2.5: true for the member who runs the board and can invite people."
           }
         }
       },
@@ -1169,6 +1431,77 @@
           "password": {
             "type": "string",
             "minLength": 4
+          }
+        }
+      },
+      "InvitationView": {
+        "type": "object",
+        "properties": {
+          "invitation_id": {
+            "type": "integer"
+          },
+          "email": {
+            "type": "string",
+            "nullable": true,
+            "description": "null for a link that was passed on."
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Seconds since 1970."
+          },
+          "expires_at": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "used",
+              "expired"
+            ]
+          },
+          "joined_as": {
+            "type": "string",
+            "nullable": true,
+            "description": "The username of the account created with it, while it exists."
+          }
+        }
+      },
+      "InvitationLink": {
+        "type": "object",
+        "properties": {
+          "link": {
+            "type": "string",
+            "description": "Shown this once; not stored."
+          },
+          "invitation": {
+            "$ref": "#/components/schemas/InvitationView"
+          }
+        }
+      },
+      "InvitationInfo": {
+        "type": "object",
+        "properties": {
+          "inviter": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "expires_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "Password": {
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
           }
         }
       }

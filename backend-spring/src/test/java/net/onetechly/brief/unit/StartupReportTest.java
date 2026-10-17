@@ -45,7 +45,7 @@ class StartupReportTest {
     @Test
     void theBoardLineSaysWhoCanUseIt() {
         assertEquals("Board: open. Anyone can read, and anyone can create an account.", StartupReport.describeBoard(false));
-        assertEquals("Board: closed. Creating an account needs the invitation code; reading needs a sign-in.",
+        assertEquals("Board: closed. Creating an account needs an invitation; reading needs a sign-in.",
                 StartupReport.describeBoard(true));
     }
 }

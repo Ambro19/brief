@@ -12,6 +12,7 @@ import net.onetechly.brief.mail.LogMailer;
 import net.onetechly.brief.mail.Mail;
 import net.onetechly.brief.repository.AccountRepository;
 import net.onetechly.brief.security.AuthMode;
+import net.onetechly.brief.security.BoardOwner;
 import net.onetechly.brief.security.PasswordPolicy;
 import net.onetechly.brief.service.AccountEmailService;
 import net.onetechly.brief.service.AccountTokens;
@@ -56,7 +57,7 @@ class AccountEmailServiceTest {
     private AccountEmailService serviceFor(String mode) {
         AuthMode authMode = new AuthMode(mode);
         return new AccountEmailService(accounts, new AccountTokens(table.repository, now::get),
-                new AccountMails(mailbox, "https://brief.example"), new PasswordPolicy(authMode), authMode, now::get);
+                new AccountMails(mailbox, "https://brief.example"), new PasswordPolicy(authMode), authMode, new BoardOwner("Cy"), now::get);
     }
 
     /** An account the mocked table knows, by id and (if it has one) by address. */
@@ -93,9 +94,9 @@ class AccountEmailServiceTest {
         stored(2, "Ben", "ben@example.test", false);
         stored(3, "Cy", "cy@example.test", true);
 
-        assertEquals(new Profile(1, "Ada", null, false, true), service.profile(1), "no address: nothing to wait for");
-        assertEquals(new Profile(2, "Ben", "ben@example.test", false, false), service.profile(2), "address given, not confirmed");
-        assertEquals(new Profile(3, "Cy", "cy@example.test", true, true), service.profile(3));
+        assertEquals(new Profile(1, "Ada", null, false, true, false), service.profile(1), "no address: nothing to wait for");
+        assertEquals(new Profile(2, "Ben", "ben@example.test", false, false, false), service.profile(2), "address given, not confirmed");
+        assertEquals(new Profile(3, "Cy", "cy@example.test", true, true, true), service.profile(3), "Cy runs the board (2.5)");
         assertThrows(NotFoundException.class, () -> service.profile(99));
     }
 

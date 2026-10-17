@@ -1,5 +1,145 @@
 # Changelog
 
+## 2.5.0 - 2026-10-16
+
+**Joining becomes professional.** Tested on the live site, 2.4's shared invitation code showed its weakness:
+a newcomer had no way to know it and nowhere to get it. 2.5 replaces it with **invitation links** that the
+person who runs the board sends, by email or by hand. It also brings what a board needs before strangers
+join: **deleting an account**, and **Terms** and **Privacy** pages. The Javalin edition's Java code is
+unchanged; it receives the new web app build, which works with it as before.
+
+**Read "Before you deploy" below before pushing this to GitHub.**
+
+Spring Boot edition:
+
+- **Invitations.** Migration `V4__invitations.sql` adds the table `invitation`. The board owner
+  (`BRIEF_OWNER_USERNAME`) can:
+  - mail one: `POST /invitations` sends `<BRIEF_PUBLIC_URL>/?invite=<secret>` ("AmbroLum invited you to
+    Brief!"). The account created with it starts with that address **already confirmed**: no second mail;
+  - make a link to pass on by text message or in person: `POST /invitations/link` (shown once). The
+    newcomer then gives an address and confirms it as usual;
+  - list what was sent (`GET /invitations`: waiting, joined as whom, expired) and withdraw an unused one
+    (`DELETE /invitations/{id}`).
+  An invitation works once, for 7 days (`BRIEF_INVITATION_DAYS`); inviting the same address again replaces
+  the earlier link; at most 50 a day. As with the links of 2.4, only a SHA-256 hash of the secret is stored.
+- **`POST /register` takes `"invitation"`** (the secret). On a closed board it is required (403 without, and
+  five bad ones from an address lock it out for 15 minutes); with a mailed invitation the address is fixed.
+  `POST /invitations/lookup` tells the web app who sent a link and to which address. The 2.4 field
+  `invite_code` is ignored.
+- **`BRIEF_BOARD=open|closed`** replaces "closed when `BRIEF_INVITE_CODE` is set". A server that still has
+  `BRIEF_INVITE_CODE` and no `BRIEF_BOARD` stays **closed**, so the upgrade cannot open the board, and the
+  start-up log asks for `BRIEF_BOARD=closed`. A new log line names the owner, and warns when a closed
+  board has none, or when the name matches no account.
+- **Deleting an account.** `POST /accounts/{id}/deletion` with the password deletes the account and every
+  post it wrote (`service/AccountDeletionService.java`). Mentions, mailed links and sent invitations go with
+  it through the database's foreign keys; the invitation it joined with, which holds its address, is deleted too. Wrong
+  passwords answer 403 (not 401, which the web app reads as an ended session) and count with sign-ins. The
+  board owner cannot delete theirs.
+- `GET /me` reports `is_owner`.
+
+Web app (both editions):
+
+- **Invitation links** open "AmbroLum invited you to Brief!" with Create account ready: a mailed
+  invitation shows its address, fixed and confirmed, so only a username and a password are asked. A used,
+  withdrawn or expired link says so.
+- **No more code field.** On a closed board without an invitation, Create account explains: "Brief! is
+  invitation-only here. To join, ask the person who runs this board to invite you."
+- **Invite people** (for the owner): by email, or a link with a Copy button; the list of what was sent,
+  with Withdraw.
+- **Check your email** (your idea from Resend's sign-up): while a new address waits for confirmation, a
+  full step with "I've opened it", "Send the link again" and "Use a different address" takes the place of
+  the post box.
+- **Your account:** what Brief! keeps about you, and **Delete my account** (tick box and password).
+- **Terms** and **Privacy** pages (`terms.html`, `privacy.html`), linked in the rail and on Create account.
+  Plain drafts written for OneTechly, LLC; **read them before they go live**, they are not legal advice.
+- `docs/openapi.json` describes 2.5.0: 21 paths.
+
+Deployment files and documents:
+
+- `render.yaml`: `BRIEF_BOARD=closed`, `BRIEF_OWNER_USERNAME` (to be set in the dashboard), no more
+  `BRIEF_INVITE_CODE`. Its header and the README now say plainly that Render does **not** add a new variable
+  to an existing service: the cause of the failed deploy of October 15.
+
+Not in this release, moved to 2.6: push notifications to a closed app, longer sessions. Start-up time is
+unchanged (still the free instance's tenth of a processor).
+
+### Before you deploy
+
+In Render, open the service **brief**, **Environment**, and in this order:
+
+1. **Add** `BRIEF_BOARD` = `closed` and `BRIEF_OWNER_USERNAME` = `AmbroLum`. Save. (2.4, still running,
+   ignores both.) **Do not delete `BRIEF_INVITE_CODE` yet**: without it, 2.4 would open the board.
+2. **Push 2.5.0.** After the deploy the log must show `Board: closed. ...`, `Owner: AmbroLum. ...` and a
+   WARN that `BRIEF_INVITE_CODE` is no longer used.
+3. **Then delete** `BRIEF_INVITE_CODE` and save. After that restart the WARN is gone.
+
+The owner can be changed later by changing `BRIEF_OWNER_USERNAME`. It must name an existing account: the
+name in it can never be registered (see "Independent review"). Links the former owner handed out stop working.
+
+In your repository: the new files come with the zip; nothing to rename this time. The web app's files are now
+`index-C5wnKrKa.js` and `index-DOyME9Bf.css`; delete any other `index-*` file in the two `assets` folders.
+
+Tests: 332 (was 303). 215 unit, 117 end-to-end.
+
+### Independent review
+
+Before release, a separate reviewer that had not seen how 2.5 was built read the code against a list:
+joining without an invitation, using one twice, inviting or withdrawing as someone else, deleting someone
+else's account, the database when an account goes, and whether the Terms and Privacy pages say what the code
+does. Found and fixed:
+
+- **High: one link passed on could admit several people.** `markUsed` read the invitation, checked it and
+  saved it. Inside a transaction Hibernate answers that read from memory, so registrations sent at the same
+  moment all saw "unused" and all joined. Now one `UPDATE ... where used_at is null and expires_at > now`
+  (`InvitationRepository.claim`) does the check and the change together; the database lets one through.
+  New test: six registrations with one link at the same instant admit one, and leave no other account. It
+  failed against the old code every time it was run.
+- **Medium: the owner's name could be taken.** With `BRIEF_OWNER_USERNAME` set before that account existed,
+  on an open board, whoever registered the name first would have run the board. The name is now never free.
+- **Medium: a deleted member's address stayed** in the invitation they joined with, and in the owner's list,
+  though the Privacy notice says it goes. That invitation is now deleted with the account.
+- **Low:** links from a former owner kept working after `BRIEF_OWNER_USERNAME` changed (now refused);
+  invitations nobody used were kept forever (now deleted 30 days after they expire, and the Privacy notice
+  says so); the Terms promised account deletion without the owner's exception; Create account blamed the
+  username when an invited address had meanwhile found an account; an ended session on Your account said
+  "That didn't work" instead of signing out.
+
+Left as they are: an account being deleted while the same member posts at that instant can fail with "try
+again" (409) and delete nothing; the Javalin edition serves the Terms page though its server cannot delete
+accounts (it answers 404, which the web app explains).
+
+Verification status at release:
+- **Not yet run with real Spring.** 2.0.0 to 2.4.0 were written the same way and passed every test on their
+  first real run (82, 133, 149, 207, 303). Expect `Tests run: 332`.
+- Run on the stand-in for Spring (real JUnit 5, Mockito, Jackson, H2 and PostgreSQL 16 underneath): all 332
+  tests, on H2 and again on PostgreSQL, also from a fresh unpack of the zip.
+- `V4` run for real: on PostgreSQL 16 over a database 2.4.0 had created and filled, and on an H2 file taken
+  from 2.4.0 to 2.5.0; each started a second time (nothing to do).
+- The deployment rehearsed on PostgreSQL with Render's variables: first with the dashboard unchanged
+  (`BRIEF_INVITE_CODE` still set, no `BRIEF_BOARD`, no owner): the board stayed closed, the old code was
+  refused, a member signed in under 2.4 stayed signed in, and the log gave the two warnings. Then with
+  `BRIEF_BOARD=closed` and the owner: an invitation mailed through a local stand-in for Resend, with the
+  right sender, recipient, subject and a link to https://briefmessage.net; the invitee joined and posted at
+  once; neither the key nor any secret appeared in the application's log. **No mail went through Resend.**
+- The web app in Chromium: 33 new checks (invite-only page, Invite people, a mailed invitation, a link passed
+  on with the Check your email step, withdrawing, the account page and deletion, Terms and Privacy, phone
+  widths), the 56 checks written for 2.3 again, and 10 checks of the new web app served by a 2.3.0 server.
+- 39 deliberate bugs in the new code: the tests caught 38. The one that slipped through (withdrawing an
+  invitation someone else sent) showed a missing test; it is added and catches it.
+- Found and fixed on the way: the "Members only" page still spoke of an invitation code; the list of sent
+  invitations was indented; a unit test lacked a saved account.
+- An independent review; see above. The stand-in now runs `@Transactional` methods in real database
+  transactions (commit, or roll back on an exception), so that the test of simultaneous registrations means
+  the same there as under Spring. The one `UPDATE` was also tried by hand on PostgreSQL 16 and H2: the second
+  of two simultaneous transactions changed 0 rows.
+
+Known limits:
+- Only the board owner can invite. Letting members invite, and one owner for several boards, comes with
+  private boards.
+- A link passed on by hand can be used by whoever holds it, once; withdraw it if it went to the wrong place.
+- Account deletion is immediate: there is no grace period and no export of one's posts yet.
+- If Render keeps database backups (the paid plan does), deleted data leaves them only as they expire.
+
 ## 2.4.0 - 2026-10-11
 
 **Accounts become real** (milestone M3a of the launch roadmap, version 3, section 3). An account has an

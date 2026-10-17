@@ -12,11 +12,14 @@ import net.onetechly.brief.exception.UnauthorizedException;
 import net.onetechly.brief.repository.AccountRepository;
 import net.onetechly.brief.security.AuthMode;
 import net.onetechly.brief.security.BoardAccess;
+import net.onetechly.brief.security.BoardOwner;
 import net.onetechly.brief.security.EmailPolicy;
 import net.onetechly.brief.security.PasswordPolicy;
 import net.onetechly.brief.security.UsernamePolicy;
 import net.onetechly.brief.service.AccountEmailService;
 import net.onetechly.brief.service.AccountService;
+import net.onetechly.brief.service.InvitationService;
+import net.onetechly.brief.entity.Invitation;
 import net.onetechly.brief.util.PasswordHasher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,20 +44,25 @@ class AccountServiceTest {
 
     private AccountRepository accounts;
     private AccountEmailService emailService;
+    private InvitationService invitations;
     private AccountService service;
 
     @BeforeEach
     void setUp() {
         accounts = mock(AccountRepository.class);
         emailService = mock(AccountEmailService.class);
-        service = serviceFor("strict", "");
+        invitations = mock(InvitationService.class);
+        when(invitations.usable(any())).thenReturn(Optional.empty());
+        when(invitations.now()).thenReturn(1_000_000L);
+        service = serviceFor("strict", "open");
     }
 
     /** The service as Spring would build it for this mode and this invitation code ("" = an open board). */
-    private AccountService serviceFor(String mode, String inviteCode) {
+    private AccountService serviceFor(String mode, String board) {
         AuthMode authMode = new AuthMode(mode);
         return new AccountService(accounts, new UsernamePolicy(authMode), new PasswordPolicy(authMode),
-                new EmailPolicy(authMode), new BoardAccess(authMode, inviteCode), emailService);
+                new EmailPolicy(authMode), new BoardAccess(authMode, board, ""), emailService,
+                invitations, new BoardOwner("AmbroLum"));
     }
 
     /**
@@ -109,6 +117,18 @@ class AccountServiceTest {
 
         assertThrows(BadRequestException.class, () -> service.register(registration("ambroise", "another1")));
         verify(accounts, never()).save(any(Account.class));
+    }
+
+    @Test
+    void theBoardOwnersNameIsNeverFreeEvenBeforeThatAccountExists() {
+        // Review of 2.5.0: on an open board, a stranger who registered "ambrolum" first would run the board.
+        when(accounts.findByUsernameKey(any())).thenReturn(Optional.empty());
+        savingAssignsId(1);
+
+        assertThrows(BadRequestException.class, () -> service.register(registration("ambrolum", "secret12")));
+        assertThrows(BadRequestException.class, () -> service.register(registration("AMBROLUM", "secret12")));
+        verify(accounts, never()).save(any(Account.class));
+        assertEquals(1, service.register(registration("ambrolum2", "secret12")).accountId(), "a similar name is fine");
     }
 
     // ---- usernames are one name whatever the capitals (2.3) ----
@@ -192,7 +212,7 @@ class AccountServiceTest {
 
     @Test
     void registerAcceptsAFourCharacterPasswordInCompatMode() {
-        AccountService compat = serviceFor("compat", "");
+        AccountService compat = serviceFor("compat", "open");
         when(accounts.findByUsernameKey("ambroise")).thenReturn(Optional.empty());
         savingAssignsId(1);
 
@@ -305,7 +325,7 @@ class AccountServiceTest {
 
     @Test
     void compatModeNeedsNoAddressAndSendsNoMailWithoutOne() {
-        AccountService compat = serviceFor("compat", "");
+        AccountService compat = serviceFor("compat", "open");
         savingAssignsId(1);
 
         compat.register(Registration.of("ambroise", "pass"));
@@ -320,18 +340,71 @@ class AccountServiceTest {
     }
 
     @Test
-    void onAClosedBoardTheInvitationCodeIsCheckedBeforeAnythingElse() {
-        AccountService closed = serviceFor("strict", "spring-tulip-2026");
+    void onAClosedBoardTheInvitationIsCheckedBeforeAnythingElse() {
+        AccountService closed = serviceFor("strict", "closed");
         savingAssignsId(1);
 
         assertThrows(ForbiddenException.class, () -> closed.register(Registration.of("ambroise", "secret12", "a@example.test")));
-        assertThrows(ForbiddenException.class, () -> closed.register(new Registration("ambroise", "secret12", "a@example.test", "wrong")));
+        assertThrows(ForbiddenException.class, () -> closed.register(new Registration("ambroise", "secret12", "a@example.test", "unknown")));
         // a request that is wrong in every other way still only hears "no": nothing about names or addresses leaks
-        assertThrows(ForbiddenException.class, () -> closed.register(new Registration("x", "1", "nope", "wrong")));
+        assertThrows(ForbiddenException.class, () -> closed.register(new Registration("x", "1", "nope", "unknown")));
         verify(accounts, never()).findByUsernameKey(any());
         verify(accounts, never()).findByEmail(any());
+        verify(accounts, never()).save(any(Account.class));
+    }
 
-        assertEquals(new AccountResponse(1, "ambroise", "secret12"),
-                closed.register(new Registration("ambroise", "secret12", "a@example.test", " spring-tulip-2026 ")));
+    @Test
+    void aMailedInvitationGivesTheAccountItsAddressAlreadyConfirmed() {
+        AccountService closed = serviceFor("strict", "closed");
+        savingAssignsId(5);
+        Invitation mailed = new Invitation(1, "maya@example.test", "hash", 999_000L, 2_000_000L);
+        when(invitations.usable("good")).thenReturn(Optional.of(mailed));
+
+        // the address may be left out: the invitation names it
+        assertEquals(new AccountResponse(5, "Maya", "secret12"), closed.register(new Registration("Maya", "secret12", null, "good")));
+
+        ArgumentCaptor<Account> saved = ArgumentCaptor.forClass(Account.class);
+        verify(accounts).save(saved.capture());
+        assertEquals("maya@example.test", saved.getValue().getEmail());
+        assertTrue(saved.getValue().isEmailVerified(), "opening the mailed link proved the inbox");
+        assertEquals(Long.valueOf(1_000_000L), saved.getValue().getEmailVerifiedAt());
+        verify(emailService, never()).startVerification(any(Account.class));
+        verify(invitations).markUsed(mailed, 5);
+    }
+
+    @Test
+    void aMailedInvitationRefusesAnotherAddress() {
+        AccountService closed = serviceFor("strict", "closed");
+        savingAssignsId(8);
+        when(invitations.usable("good")).thenReturn(Optional.of(new Invitation(1, "maya@example.test", "hash", 1L, 2_000_000L)));
+
+        assertThrows(BadRequestException.class, () -> closed.register(new Registration("Maya", "secret12", "other@example.test", "good")));
+        assertDoesNotThrow(() -> closed.register(new Registration("Maya", "secret12", " MAYA@example.test ", "good")),
+                "the same address in other capitals is the same address");
+    }
+
+    @Test
+    void aPassedOnInvitationLinkStillNeedsTheAddressConfirmed() {
+        AccountService closed = serviceFor("strict", "closed");
+        savingAssignsId(6);
+        Invitation link = new Invitation(1, null, "hash", 1L, 2_000_000L);
+        when(invitations.usable("link")).thenReturn(Optional.of(link));
+
+        assertThrows(BadRequestException.class, () -> closed.register(new Registration("Ben", "secret12", null, "link")),
+                "no address in the invitation: the newcomer gives one, as on an open board");
+        closed.register(new Registration("Ben", "secret12", "ben@example.test", "link"));
+
+        ArgumentCaptor<Account> saved = ArgumentCaptor.forClass(Account.class);
+        verify(accounts).save(saved.capture());
+        assertTrue(saved.getValue().isWaitingForVerification());
+        verify(emailService).startVerification(saved.getValue());
+        verify(invitations).markUsed(link, 6);
+    }
+
+    @Test
+    void onAnOpenBoardAnInvitationIsOptionalButMustBeGoodIfGiven() {
+        savingAssignsId(7);
+        assertThrows(ForbiddenException.class, () -> service.register(new Registration("Ada", "secret12", "ada@example.test", "stale")));
+        assertDoesNotThrow(() -> service.register(Registration.of("Ada", "secret12", "ada@example.test")));
     }
 }

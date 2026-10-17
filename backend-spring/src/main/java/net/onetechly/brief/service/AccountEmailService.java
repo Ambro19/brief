@@ -10,6 +10,7 @@ import net.onetechly.brief.exception.TooManyRequestsException;
 import net.onetechly.brief.mail.AccountMails;
 import net.onetechly.brief.repository.AccountRepository;
 import net.onetechly.brief.security.AuthMode;
+import net.onetechly.brief.security.BoardOwner;
 import net.onetechly.brief.security.EmailPolicy;
 import net.onetechly.brief.security.PasswordPolicy;
 import net.onetechly.brief.util.PasswordHasher;
@@ -51,23 +52,26 @@ public class AccountEmailService {
     private final AccountMails mails;
     private final PasswordPolicy passwordPolicy;
     private final AuthMode mode;
+    private final BoardOwner owner;
     private final LongSupplier clockSeconds;
 
     /** The constructor Spring uses. */
     @Autowired
     public AccountEmailService(AccountRepository accounts, AccountTokens tokens, AccountMails mails,
-                               PasswordPolicy passwordPolicy, AuthMode mode) {
-        this(accounts, tokens, mails, passwordPolicy, mode, () -> System.currentTimeMillis() / 1000);
+                               PasswordPolicy passwordPolicy, AuthMode mode, BoardOwner owner) {
+        this(accounts, tokens, mails, passwordPolicy, mode, owner, () -> System.currentTimeMillis() / 1000);
     }
 
     /** The clock is injectable so tests can move time forward without sleeping. */
     public AccountEmailService(AccountRepository accounts, AccountTokens tokens, AccountMails mails,
-                               PasswordPolicy passwordPolicy, AuthMode mode, LongSupplier clockSeconds) {
+                               PasswordPolicy passwordPolicy, AuthMode mode, BoardOwner owner,
+                               LongSupplier clockSeconds) {
         this.accounts = accounts;
         this.tokens = tokens;
         this.mails = mails;
         this.passwordPolicy = passwordPolicy;
         this.mode = mode;
+        this.owner = owner;
         this.clockSeconds = clockSeconds;
     }
 
@@ -78,7 +82,7 @@ public class AccountEmailService {
 
     private Profile profileOf(Account account) {
         return new Profile(account.getAccountId(), account.getUsername(), account.getEmail(),
-                account.isEmailVerified(), mayPost(account));
+                account.isEmailVerified(), mayPost(account), owner.isOwner(account));
     }
 
     /** In strict mode a member who gave an address must have confirmed it. In compat mode nothing is asked. */

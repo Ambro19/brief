@@ -25,6 +25,10 @@ See [Deploy it](#deploy-it). It runs at https://briefmessage.net.
 password is replaced through a mailed link; and a board can be **closed**, so that only invited people can
 join and only members can read. See [Email, and a closed board](#email-and-a-closed-board).
 
+**2.5 makes joining professional:** the person who runs a closed board invites people by **email or by
+link**, and nobody types a code; a member can **delete their account**; the web app has **Terms** and
+**Privacy** pages. See [Invitations](#invitations-25).
+
 Brief! started as the Revature "Social Media Blog API" training project and keeps that project's
 eight-endpoint contract intact.
 
@@ -39,7 +43,7 @@ includes the Maven Wrapper (`mvnw`), which downloads Maven the first time you us
 
 ```powershell
 cd backend-spring
-.\mvnw.cmd test                    # 303 tests
+.\mvnw.cmd test                    # 332 tests
 .\mvnw.cmd package                 # builds target\brief-spring.jar
 java -jar target\brief-spring.jar  # open http://localhost:8080
 ```
@@ -83,7 +87,7 @@ docker compose up -d postgres                                        # PostgreSQ
 java -jar target\brief-spring.jar --spring.profiles.active=postgres
 ```
 
-**The tests on PostgreSQL.** The same 303 tests, with the end-to-end ones against a real PostgreSQL:
+**The tests on PostgreSQL.** The same 332 tests, with the end-to-end ones against a real PostgreSQL:
 
 ```powershell
 docker compose up -d postgres-test                                   # port 5433, starts empty every time
@@ -148,10 +152,11 @@ uses that PostgreSQL database instead; the tables are created at the first start
 the token-signing key, and connects the two. After the first deploy, check the log for the line
 `Database: PostgreSQL, ...`.
 
-Two values are secrets and are **not** in `render.yaml`: `BRIEF_INVITE_CODE` and `BRIEF_RESEND_API_KEY`. Render
-asks for them when a Blueprint is first created. On a service that already exists it does not: add them under
-the service's **Environment** tab. The start-up log tells you what the application found, in two lines that
-start with `Board:` and `Mail:`.
+Two values are **not** filled in by `render.yaml`: `BRIEF_RESEND_API_KEY` (a secret) and `BRIEF_OWNER_USERNAME`.
+Add them under the service's **Environment** tab. **On a service that already exists, Render does not add a
+variable that a later `render.yaml` introduces either**: every new variable is listed in `CHANGELOG.md` under
+"Before you deploy", to be added by hand before pushing. The start-up log tells you what the application found,
+in the lines that start with `Board:`, `Owner:` and `Mail:`.
 
 Since 2.4 Render deploys a commit only **after its checks on GitHub have passed** (`autoDeployTrigger: checksPass`).
 A push whose tests fail stays on GitHub.
@@ -168,7 +173,8 @@ What the deployed application reads:
 | `BRIEF_PUBLIC_URL` | `render.yaml`: `https://briefmessage.net` | Where the links in mails point |
 | `BRIEF_MAIL_FROM` | `render.yaml`: `Brief! <hello@briefmessage.net>` | The sender of the mails. Its domain must be verified at Resend |
 | `BRIEF_RESEND_API_KEY` | **you, in the dashboard** | The key of the mail service. Without it mails are written to the log, not sent |
-| `BRIEF_INVITE_CODE` | **you, in the dashboard** | Closes the board: see below. Without it the board is open |
+| `BRIEF_BOARD` | `render.yaml`: `closed` | `closed`: joining needs an invitation and reading a sign-in. `open`: anyone reads and joins |
+| `BRIEF_OWNER_USERNAME` | **you, in the dashboard** | The member who runs the board and sends invitations (on briefmessage.net: `AmbroLum`) |
 
 ## Features
 
@@ -187,8 +193,11 @@ What the deployed application reads:
   in on this device** keeps the session after the tab or the app is closed.
 - **Since 2.4:** an email address per account, confirmed through a mailed link (until then the member reads
   but does not post); **Forgot password?** mails a link for choosing a new one, which also signs the account
-  out on every device; a board can be **closed** with an invitation code; an address is shown to nobody but
+  out on every device; a board can be **closed** to invited people; an address is shown to nobody but
   its owner.
+- **Since 2.5:** invitations by email or by link from the person who runs a closed board; a "Check your email"
+  step until a new address is confirmed; **Your account**, with what Brief! keeps and how to delete it all;
+  Terms and Privacy pages.
 - Posts of up to 255 characters, with the limit drawn as a ruler while you type.
 - **Links:** web addresses in posts open in a new tab, with or without `https://` in front
   (`pixelperfectapi.net` works). Posts are never treated as HTML.
@@ -208,7 +217,7 @@ whenever that word is written. A bare address becomes a link only if it ends in 
 
 | Method | Path | Success | Failure |
 |---|---|---|---|
-| POST | `/register` | 200 + account | 400 invalid, username, password or email against the rule, or username or email taken; 403 wrong or missing invitation code (closed board); 429 after too many wrong codes |
+| POST | `/register` | 200 + account | 400 invalid, username, password or email against the rule, or username or email taken; 403 no usable invitation (closed board); 429 after too many bad invitations |
 | POST | `/login` | 200 + account, token in `X-Auth-Token` header | 401; 429 after too many attempts (Spring, strict) |
 | POST | `/logout` | 200 (always) | |
 | GET | `/accounts` | 200 + list of `{account_id, username}` | |
@@ -223,7 +232,13 @@ whenever that word is written. A bare address becomes a link only if it ends in 
 | PATCH | `/messages/{id}` | 200 + full updated message | 400 |
 | DELETE | `/messages/{id}` | 200 + deleted message, or 200 with empty body | |
 | GET | `/health` | 200 `{"status":"UP"}` (Spring adds `"password_policy"`, and since 2.4 `"email"` and `"board"`) | |
-| GET | `/me` | 200 + `{account_id, username, email, email_verified, can_post}` (Spring, 2.4) | 401 |
+| GET | `/me` | 200 + `{account_id, username, email, email_verified, can_post, is_owner}` (Spring, 2.4; `is_owner` 2.5) | 401 |
+| POST | `/invitations` | 200; mails an invitation (Spring, 2.5, board owner) | 400 not an address or already a member; 401; 403 not the owner; 429 |
+| POST | `/invitations/link` | 200 + `{link, invitation}`, the link shown once (Spring, 2.5, board owner) | 401; 403; 429 |
+| GET | `/invitations` | 200 + the invitations sent, newest first (Spring, 2.5, board owner) | 401; 403 |
+| DELETE | `/invitations/{id}` | 200; the link stops working (Spring, 2.5, board owner) | 400 used; 404 |
+| POST | `/invitations/lookup` | 200 + `{inviter, email, expires_at}`; no sign-in needed (Spring, 2.5) | 400 unknown, used, withdrawn or expired |
+| POST | `/accounts/{id}/deletion` | 200; deletes the account and its posts; body `{"password": "..."}` (Spring, 2.5) | 400 board owner; 401; 403 other account or wrong password; 429 |
 | POST | `/accounts/{id}/email` | 200 + the same; mails the confirmation link (Spring, 2.4) | 400 not an address, taken, or already confirmed; 401; 403 someone else's account |
 | POST | `/email/verification` | 200; mails the link again (Spring, 2.4) | 400 nothing to confirm; 401; 429 within a minute |
 | POST | `/email/verify` | 200; body `{"token": "<secret from the link>"}`, no sign-in needed (Spring, 2.4) | 400 unknown, used or expired |
@@ -253,7 +268,7 @@ The three lists that page (`/messages`, `/accounts/{id}/messages`, `/accounts/{i
 | Failed logins (Spring Boot edition) | not limited | 5 per username and address, then 429 for 15 minutes. An IPv6 address counts together with the rest of its /64 block |
 | Email address for a new account (Spring Boot edition, 2.4) | optional | required |
 | Posting before the address is confirmed (2.4) | allowed | 403 |
-| Invitation code (2.4) | cannot be set: the application refuses to start | optional; set = closed board |
+| Closed board (`BRIEF_BOARD=closed`) | not allowed: the application refuses to start | optional |
 
 Send the token as `Authorization: Bearer <token>`. In the Spring Boot edition the token is a JWT
 (`header.payload.signature`), signed with HMAC-SHA256, valid for 12 hours, or until you sign out, or (2.4)
@@ -276,16 +291,39 @@ login token of that account worthless, on every device.
 (`mail/ResendMailer.java`), otherwise into the log (`mail/LogMailer.java`). To use another service, write
 one more class that implements `mail/Mailer.java`.
 
-**A closed board.** Start the application with `BRIEF_INVITE_CODE` set (8 characters or more) and:
+**A closed board.** Start the application with `BRIEF_BOARD=closed` (strict mode only) and:
 
-- `POST /register` needs `"invite_code"` with that value; anything else answers 403. Five wrong codes
+- `POST /register` needs a usable invitation (see below); without one it answers 403. Five bad ones
   from one address lock that address out for 15 minutes.
 - Reading posts and members needs a sign-in (401 without).
-- The web app, `/health`, the API documentation and the two mailed links stay reachable without one.
+- The web app, `/health`, the API documentation, the Terms and Privacy pages and the mailed links stay
+  reachable without one.
 
 `GET /health` then says `"board": "closed"`, and the web app shows a sign-in page instead of the feed. To
-open the board again, remove the variable and restart. To change the code, change the variable and
-restart; members who already joined are not affected.
+open the board, set `BRIEF_BOARD=open` and restart.
+
+### Invitations (2.5)
+
+The member named in `BRIEF_OWNER_USERNAME` runs the board. Signed in, they see **Invite people**:
+
+- **By email:** `POST /invitations` mails `<BRIEF_PUBLIC_URL>/?invite=<secret>`. The account created with it
+  starts with that address **already confirmed**: opening the link proved the inbox.
+- **By link:** `POST /invitations/link` answers with a link, shown once, to pass on by text message or in
+  person. The newcomer gives an address and confirms it as usual.
+
+An invitation works once, for 7 days (`BRIEF_INVITATION_DAYS`), and can be withdrawn while unused. The page it
+opens says who sent it and asks only for a username and a password. At most 50 invitations a day.
+
+**Starting a new closed board:** the owner's account has to exist first. Start with `BRIEF_BOARD=open`,
+create the account, then set `BRIEF_BOARD=closed` and `BRIEF_OWNER_USERNAME` and restart. From then on
+nobody can register the owner's name, so no one can take the board over by claiming it first.
+
+**Coming from 2.4:** the shared code (`BRIEF_INVITE_CODE`) is no longer asked for. A server that still has it,
+and no `BRIEF_BOARD`, stays closed so that an upgrade never opens a board by accident; its log asks for
+`BRIEF_BOARD=closed` in its place.
+
+**Deleting an account.** `POST /accounts/{id}/deletion` with the password deletes the account and every
+post it wrote, at once (web app: **Your account**). The board owner cannot delete theirs.
 
 ### Settings
 
@@ -301,7 +339,10 @@ restart; members who already joined are not affected.
 | `BRIEF_JWT_TTL_MINUTES` | 720 | Spring only. How long a login lasts |
 | `BRIEF_LOGIN_MAX_FAILURES` | 5 | Spring only. Attempts before a lock-out |
 | `BRIEF_LOGIN_LOCKOUT_MINUTES` | 15 | Spring only. Length of the lock-out |
-| `BRIEF_INVITE_CODE` | empty | Spring only, 2.4. Set = closed board (see above). 8+ characters, strict mode only |
+| `BRIEF_BOARD` | open | Spring only, 2.5. `open` or `closed` (strict mode only). See "A closed board" |
+| `BRIEF_OWNER_USERNAME` | empty | Spring only, 2.5. The username of the member who runs the board and can invite |
+| `BRIEF_INVITATION_DAYS` | 7 | Spring only, 2.5. How long an invitation link works |
+| `BRIEF_INVITE_CODE` | empty | Spring only, 2.4. No longer used as a code since 2.5; set with no `BRIEF_BOARD`, it keeps the board closed |
 | `BRIEF_PUBLIC_URL` | `http://localhost:8080` | Spring only, 2.4. The address of the web app, used in mailed links |
 | `BRIEF_RESEND_API_KEY` | empty | Spring only, 2.4. The Resend API key. Empty = mails are written to the log. Never put a real key in a file that is committed |
 | `BRIEF_MAIL_FROM` | empty | Spring only, 2.4. The sender, for example `Brief! <hello@briefmessage.net>`. Required when the key is set |
@@ -338,13 +379,13 @@ update that file too, then run `npm run build`.
 | Edition | Unit | End to end | Total |
 |---|---|---|---|
 | Javalin (`backend/`) | 39 | 40 | 79 |
-| Spring Boot (`backend-spring/`) | 196 | 107 | 303 |
+| Spring Boot (`backend-spring/`) | 215 | 117 | 332 |
 
 The end-to-end tests start the real application, call it over HTTP, and check status codes and JSON.
-The 41 cases the two editions share are the same; the Spring Boot edition adds 66 for what 2.1 to 2.4
+The 41 cases the two editions share are the same; the Spring Boot edition adds 74 for what 2.1 to 2.5
 brought (JWT, paging, the password rule, the rate limit, the mention table, usernames, the migrations and
 foreign keys, caching, the visitor's address behind a proxy, email confirmation, password reset, the closed
-board). The mails in these tests are never sent: the application is started without a mail service, and the
+board, invitations, deleting an account). The mails in these tests are never sent: the application is started without a mail service, and the
 tests read the links from the mailer that writes to the log. Tests use an in-memory database and never
 touch the `h2/` folders. Since 2.3 that database gets its tables from the same migration files production
 runs, so every test run also tests the migrations.

@@ -1,0 +1,120 @@
+/* The Terms and Privacy pages (2.5). Plain pages outside the app, in the app's colours. */
+:root {
+  --bg: #edf1ef;
+  --surface: #ffffff;
+  --ink: #10201c;
+  --muted: #56675f;
+  --line: #d3dcd8;
+  --accent: #0a7a5e;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1614;
+    --surface: #16211e;
+    --ink: #e7efec;
+    --muted: #93a69f;
+    --line: #283833;
+    --accent: #45c99d;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.6 "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 16px 64px;
+}
+
+a {
+  color: var(--accent);
+  text-underline-offset: 3px;
+}
+
+.back {
+  display: inline-block;
+  margin-bottom: 24px;
+  font-size: 0.9375rem;
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-family: Georgia, "Iowan Old Style", serif;
+  font-size: 2.25rem;
+  line-height: 1.2;
+}
+
+h2 {
+  margin: 32px 0 8px;
+  font-size: 1.1875rem;
+}
+
+.updated {
+  margin: 0 0 24px;
+  color: var(--muted);
+}
+
+.summary {
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.summary p {
+  margin: 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+th,
+td {
+  padding: 8px 10px 8px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+li {
+  margin-bottom: 6px;
+}
+
+@media (max-width: 560px) {
+  table,
+  thead,
+  tbody,
+  tr,
+  th,
+  td {
+    display: block;
+  }
+
+  thead {
+    display: none;
+  }
+
+  td {
+    border-bottom: 0;
+    padding: 2px 0;
+  }
+
+  tr {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  td:first-child {
+    font-weight: 600;
+  }
+}

@@ -1,4 +1,4 @@
-import type { Account, Message, MessagePage, Profile, PublicAccount, ServerInfo, Session } from "./types";
+import type { Account, InvitationInfo, InvitationView, Message, MessagePage, Profile, PublicAccount, ServerInfo, Session } from "./types";
 
 /**
  * Thin client for the Java API.
@@ -68,14 +68,44 @@ export const api = {
   },
 
   /**
-   * Creates an account. The email address and the invitation code are sent only when given:
-   * an older server refuses a request with fields it does not know.
+   * Creates an account. The email address and the invitation are sent only when given, so a
+   * request to an older server carries only the fields it knows.
    */
-  async register(username: string, password: string, email?: string, inviteCode?: string): Promise<void> {
+  async register(username: string, password: string, email?: string, invitation?: string): Promise<void> {
     const body: Record<string, string> = { username, password };
     if (email) body.email = email;
-    if (inviteCode) body.invite_code = inviteCode;
+    if (invitation) body.invitation = invitation;
     await request("POST", "/register", body);
+  },
+
+  /** What an invitation link says: who sent it, to which address. 400 if it no longer works (2.5). */
+  async lookupInvitation(secret: string): Promise<InvitationInfo> {
+    return (await request("POST", "/invitations/lookup", { token: secret })).json();
+  },
+
+  /** The board owner mails an invitation (2.5). */
+  async inviteByEmail(token: string, email: string): Promise<InvitationView> {
+    return (await request("POST", "/invitations", { email }, token)).json();
+  },
+
+  /** The board owner makes a link to pass on; the answer holds it, this once (2.5). */
+  async createInvitationLink(token: string): Promise<{ link: string; invitation: InvitationView }> {
+    return (await request("POST", "/invitations/link", undefined, token)).json();
+  },
+
+  /** Everything the board owner sent, newest first (2.5). */
+  async invitations(token: string): Promise<InvitationView[]> {
+    return (await request("GET", "/invitations", undefined, token)).json();
+  },
+
+  /** Withdraws an unused invitation (2.5). */
+  async withdrawInvitation(token: string, invitationId: number): Promise<void> {
+    await request("DELETE", `/invitations/${invitationId}`, undefined, token);
+  },
+
+  /** Deletes the signed-in member's account and posts; the password is asked again (2.5). */
+  async deleteAccount(session: Session, password: string): Promise<void> {
+    await request("POST", `/accounts/${session.account_id}/deletion`, { password }, session.token);
   },
 
   async login(username: string, password: string): Promise<Session> {

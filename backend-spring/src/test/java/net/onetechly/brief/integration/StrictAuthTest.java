@@ -34,6 +34,8 @@ import static org.junit.jupiter.api.Assertions.*;
                 // Stated here so that a variable set on the machine that runs the tests can never
                 // close the board under them, or make them send real mail.
                 "brief.invite-code=",
+                "brief.board=open",
+                "brief.owner-username=",
                 "brief.mail.resend-api-key=",
                 "brief.client-ip.header=" + StrictAuthTest.PROXY_HEADER,
                 "spring.datasource.url=${BRIEF_TEST_DB_URL:jdbc:h2:mem:brief-strict;DB_CLOSE_DELAY=-1}",
@@ -535,5 +537,59 @@ class StrictAuthTest extends ApiTestBase {
         assertEquals(401, send("POST", "/messages", messageJson(2, "from nobody", 1L), second).statusCode());
         assertEquals(0, jdbc.queryForObject("select count(*) from account_token where account_id = 2", Integer.class),
                 "the links of a deleted account go with it (foreign key, on delete cascade)");
+    }
+
+    // ---- 2.5: deleting an account, and invitations on an open board ----
+
+    private static String passwordJson(String password) {
+        return "{\"password\":\"" + password + "\"}";
+    }
+
+    @Test
+    void aMemberDeletesTheirAccountAndEverythingOfItGoes() throws Exception {
+        String second = registerSecondUser();
+        assertEquals(200, send("POST", "/messages", messageJson(2, "a post by second", 1L), second).statusCode());
+        String first = loginToken("testuser1", "password");
+        assertEquals(200, send("POST", "/messages", messageJson(1, "thanks second", 2L), first).statusCode());
+        assertEquals(1, mapper.readTree(get("/accounts/2/mentions").body()).size());
+
+        assertEquals(401, send("POST", "/accounts/2/deletion", passwordJson("secret12"), null).statusCode());
+        assertEquals(403, send("POST", "/accounts/2/deletion", passwordJson("secret12"), first).statusCode(), "someone else's account");
+        assertEquals(403, send("POST", "/accounts/2/deletion", passwordJson("wrong-password1"), second).statusCode(),
+                "a wrong password is 403, not 401: the web app must not take it for an ended session");
+        assertEquals(400, send("POST", "/accounts/2/deletion", "{}", second).statusCode());
+
+        assertEquals(200, send("POST", "/accounts/2/deletion", passwordJson("secret12"), second).statusCode());
+
+        assertEquals(401, send("GET", "/me", null, second).statusCode(), "the session ended with the account");
+        assertEquals(404, get("/accounts/2").statusCode());
+        assertEquals("[]", get("/accounts/2/messages").body());
+        assertEquals(2, mapper.readTree(get("/messages").body()).size(), "the seed post and testuser1's reply remain");
+        assertTrue(get("/messages").body().contains("thanks second"), "posts by others keep their text");
+        assertEquals(0, jdbc.queryForObject("select count(*) from mention where account_id = 2", Integer.class));
+        assertEquals(0, jdbc.queryForObject("select count(*) from message where posted_by = 2", Integer.class));
+        // the name and the address are free again
+        assertNotNull(registerConfirmed("second", "secret12"));
+    }
+
+    @Test
+    void fiveWrongPasswordsWhenDeletingCountLikeFiveWrongSignIns() throws Exception {
+        String second = registerSecondUser();
+        for (int attempt = 1; attempt <= 5; attempt++) {
+            assertEquals(403, send("POST", "/accounts/2/deletion", passwordJson("wrong-" + attempt + "x"), second).statusCode());
+        }
+        assertEquals(429, send("POST", "/accounts/2/deletion", passwordJson("secret12"), second).statusCode());
+        assertEquals(429, send("POST", "/login", accountJson("second", "secret12"), null).statusCode(), "the same count as sign-ins");
+    }
+
+    @Test
+    void anOpenBoardWithoutAnOwnerHasNoInvitations() throws Exception {
+        String token = loginToken("testuser1", "password");
+        assertEquals(403, send("POST", "/invitations", emailJson("x@example.test"), token).statusCode());
+        assertEquals(403, send("POST", "/invitations/link", null, token).statusCode());
+        assertFalse(mapper.readTree(send("GET", "/me", null, token).body()).get("is_owner").asBoolean());
+        // A made-up invitation is refused even where none is needed: a link that does not work must not look as if it did.
+        assertEquals(403, send("POST", "/register", registrationJson("guest", "secret12", "guest@example.test", "made-up"), null).statusCode());
+        assertEquals(200, send("POST", "/register", registrationJson("guest", "secret12", "guest@example.test"), null).statusCode());
     }
 }

@@ -30,6 +30,8 @@ import static org.junit.jupiter.api.Assertions.*;
                 // Stated here so that a variable set on the machine that runs the tests can never
                 // close the board under them, or make them send real mail.
                 "brief.invite-code=",
+                "brief.board=open",
+                "brief.owner-username=",
                 "brief.mail.resend-api-key=",
                 "spring.datasource.url=${BRIEF_TEST_DB_URL:jdbc:h2:mem:brief-contract;DB_CLOSE_DELAY=-1}",
                 "spring.datasource.username=${BRIEF_TEST_DB_USER:sa}",
@@ -743,6 +745,39 @@ class ContractTest extends ApiTestBase {
         // a link must belong to an account
         assertThrows(DataIntegrityViolationException.class, () -> jdbc.update("insert into account_token "
                 + "(account_id, purpose, token_hash, expires_at, created_at) values (424242, 'verify', 'h', 1, 1)"));
+    }
+
+    @Test
+    void migrationFourAddedTheTableOfInvitations() throws Exception {
+        assertEquals(4, jdbc.queryForObject(
+                "select count(*) from \"flyway_schema_history\" where \"success\" = true and \"version\" in ('1', '2', '3', '4')",
+                Integer.class));
+        jdbc.update("insert into account (username, username_key, password) values ('joined', 'joined', 'x')");
+        jdbc.update("insert into invitation (inviter_id, email, token_hash, created_at, expires_at, used_at, used_by) "
+                + "values (1, 'joined@example.test', 'hash-1', 1, 2, 1, 2)");
+        // no two invitations with the same hash
+        assertThrows(DataIntegrityViolationException.class, () -> jdbc.update("insert into invitation "
+                + "(inviter_id, token_hash, created_at, expires_at) values (1, 'hash-1', 1, 2)"));
+        // an invitation is sent by an account that exists
+        assertThrows(DataIntegrityViolationException.class, () -> jdbc.update("insert into invitation "
+                + "(inviter_id, token_hash, created_at, expires_at) values (424242, 'hash-2', 1, 2)"));
+        // the account that joined is deleted: the invitation stays, and forgets by whom
+        jdbc.update("delete from account where account_id = 2");
+        assertEquals(1, jdbc.queryForObject("select count(*) from invitation where used_by is null and used_at = 1", Integer.class));
+        // the sender is deleted: the invitations go with them
+        jdbc.update("delete from message where posted_by = 1");
+        jdbc.update("delete from account where account_id = 1");
+        assertEquals(0, jdbc.queryForObject("select count(*) from invitation", Integer.class));
+    }
+
+    @Test
+    void compatModeLetsAMemberDeleteTheirAccountWithTheirToken() throws Exception {
+        assertEquals(401, send("POST", "/accounts/1/deletion", "{\"password\":\"password\"}", null).statusCode(),
+                "deleting is never open to anyone, not even in compat mode");
+        String token = loginToken("testuser1", "password");
+        assertEquals(200, send("POST", "/accounts/1/deletion", "{\"password\":\"password\"}", token).statusCode());
+        assertEquals(404, get("/accounts/1").statusCode());
+        assertEquals("", get("/messages/1").body(), "the posts went with the account");
     }
 
     private static String cacheControl(HttpResponse<String> response) {

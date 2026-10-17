@@ -132,6 +132,16 @@ Read-time search versus write-time index:
 | Writing only what changed | `@DynamicUpdate` on `entity/Account.java` | By default Hibernate's UPDATE names every column, so two overlapping changes to one row can undo each other |
 | Deploy what passed | `render.yaml` (`autoDeployTrigger: checksPass`), `.github/workflows/ci.yml` | The tests on GitHub are the gate in front of production |
 
+## Added in 2.5 (Spring Boot edition only)
+
+| Feature | Where | The idea |
+|---|---|---|
+| Invitations | `service/InvitationService.java`, `entity/Invitation.java`, `db/migration/V4__invitations.sql` | A secret per person instead of one code for everyone: it can be traced, withdrawn, used once. Mailed, it also proves the inbox, so the new account needs no separate confirmation |
+| A role from configuration | `security/BoardOwner.java` | Who may invite is one setting (`BRIEF_OWNER_USERNAME`), not a column a request could change |
+| A safe upgrade path | `security/BoardAccess.java` | An old setting that meant "closed" still means closed. Changing what a setting means must never quietly open a door |
+| Deleting an account | `service/AccountDeletionService.java` | The code deletes what the database cannot (posts, whose author must exist); the database deletes the rest through `on delete cascade` and `on delete set null` |
+| Static pages next to the app | `public/terms.html`, `privacy.html` | Plain HTML served by the same backend; no route, no code |
+
 ## What the Spring edition does not have yet
 
 - springdoc-openapi to generate the API description from the code
