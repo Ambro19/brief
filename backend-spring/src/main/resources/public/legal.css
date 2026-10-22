@@ -1,4 +1,4 @@
-/* The Terms and Privacy pages (2.5). Plain pages outside the app, in the app's colours. */
+/* The Terms and Privacy pages (2.5) and the Help Center (2.6). Plain pages outside the app, in the app's colours. */
 :root {
   --bg: #edf1ef;
   --surface: #ffffff;
@@ -117,4 +117,79 @@ li {
   td:first-child {
     font-weight: 600;
   }
+}
+
+/* ---- Help Center (2.6) ---- */
+
+/* "Brief! / Help Center / Using Brief!" above an article. */
+.crumbs {
+  margin-bottom: 24px;
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+.crumbs span[aria-hidden] {
+  margin: 0 6px;
+}
+
+/* The one-sentence summary under a title. */
+.lead {
+  margin: 0 0 24px;
+  color: var(--muted);
+  font-size: 1.0625rem;
+}
+
+/* The list of articles on the Help Center page: one card per article. */
+.help-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.help-list li {
+  margin-bottom: 10px;
+}
+
+.help-list a {
+  display: block;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.help-list a:hover,
+.help-list a:focus-visible {
+  border-color: var(--accent);
+}
+
+.help-list strong {
+  display: block;
+  color: var(--accent);
+}
+
+.help-list span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+/* "Still have a question?" at the end of every page. */
+.help-foot {
+  margin-top: 40px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  font: inherit;
+  font-size: 0.875em;
 }

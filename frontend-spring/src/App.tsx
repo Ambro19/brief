@@ -715,6 +715,8 @@ export default function App() {
           <a href="/docs/index.html">API docs</a>
           <a href="/terms.html">Terms</a>
           <a href="/privacy.html">Privacy</a>
+          {/* 2.6: what Brief! is, how to use it, pricing, FAQ and refunds, as plain pages like Terms and Privacy. */}
+          <a href="/help/index.html">Help</a>
         </p>
         {!session && (
           <p className="rail-also">

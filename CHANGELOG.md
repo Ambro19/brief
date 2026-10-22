@@ -1,5 +1,52 @@
 # Changelog
 
+## 2.6.0 - 2026-10-21
+
+**A Help Center.** Plain, short pages that say what Brief! is and how to use it, for members and for visitors
+who have not been invited yet. One milestone, as agreed: notifications to a closed app and longer sessions
+move to 2.7.
+
+Web app (both editions):
+
+- **Help** in the rail, beside Privacy, opens `/help/index.html`: six articles in three groups.
+  - **About Brief!:** *What Brief! is* (the 255-character rule and why it works) and *Who Brief! is for*
+    (software teams, small businesses, project groups; and what Brief! is not for).
+  - **Using Brief!:** *Getting started* (invitation, username and password, confirming the address, posting
+    and mentions, signing in) and *Frequently asked questions*.
+  - **Plans and billing:** *Pricing*: free during early access; paid plans announced at least 30 days
+    ahead, and never charged without the member choosing a plan. *Refund policy*: nothing is charged
+    today; terms for paid plans published before the first charge; a mistaken charge is refunded.
+- Same look as the Terms and Privacy pages (`legal.css`), light and dark, readable on a phone. Every page
+  ends with the support address and the way back.
+- The pages describe only what Brief! does today. Private boards per team are named as planned, not as
+  available.
+
+Spring Boot edition: no change to the Java code or the API. Pages under `/help/` are public on a closed board,
+like the Terms and Privacy pages. `docs/openapi.json` says 2.6.0.
+
+### Before you deploy
+
+Nothing to change in Render: no new variable. Copy the zip over your repository as before (robocopy), delete
+the old web app files, test, commit and push. The web app's files are now `index-DcmQyTm0.js` and
+`index-DOyME9Bf.css` (the style sheet is unchanged).
+
+Tests: 333 (was 332). 215 unit, 118 end-to-end. New: `ClosedBoardTest.theHelpCenterIsPublicAndEveryArticleItListsExists`
+opens the Help Center on a closed board and every article it lists.
+
+Verification status at release:
+- **Not yet run with real Spring.** Expect `Tests run: 333`.
+- Run on the stand-in for Spring: all 333 tests on H2 and on PostgreSQL 16. Removing one article makes the new
+  test fail, as it should.
+- The web app in Chromium: 17 new checks (Help in the rail for visitors and members, every article complete,
+  the way back, no sideways scrolling on a phone, dark mode, no script errors); the 33 checks of 2.5 (one now
+  allows the extra link); the 56 checks of 2.3 (one now expects 2.6.0 in the API docs); and the 10 checks of
+  the web app served by a 2.3.0 server.
+
+Known limits:
+- The articles are plain HTML files: changing one means a release. A Help Center you can edit without a release
+  can come later, if the articles start changing often.
+- No search. Six articles do not need one.
+
 ## 2.5.0 - 2026-10-16
 
 **Joining becomes professional.** Tested on the live site, 2.4's shared invitation code showed its weakness:

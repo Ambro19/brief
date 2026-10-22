@@ -92,9 +92,33 @@ class ClosedBoardTest extends ApiTestBase {
     @Test
     void theWebAppTheDocumentationAndTheTermsStayPublic() throws Exception {
         for (String path : new String[] {"/", "/index.html", "/manifest.json", "/sw.js", "/docs/index.html", "/docs/openapi.json",
-                "/terms.html", "/privacy.html"}) {
+                "/terms.html", "/privacy.html", "/legal.css", "/help/index.html"}) {
             assertEquals(200, get(path).statusCode(), path);
         }
+    }
+
+    @Test
+    void theHelpCenterIsPublicAndEveryArticleItListsExists() throws Exception {
+        // 2.6: the Help Center is for visitors too (what Brief! is, pricing), so a closed board
+        // must not hide it. Every article linked from its first page must answer, so a renamed
+        // or missing page is caught here and not by a visitor.
+        HttpResponse<String> index = get("/help/index.html");
+        assertEquals(200, index.statusCode());
+        assertTrue(index.headers().firstValue("Content-Type").orElse("").startsWith("text/html"));
+        java.util.regex.Matcher links = java.util.regex.Pattern.compile("href=\"(/help/[a-z-]+\\.html)\"").matcher(index.body());
+        List<String> articles = new ArrayList<>();
+        while (links.find()) {
+            articles.add(links.group(1));
+        }
+        assertEquals(List.of("/help/what-is-brief.html", "/help/who-its-for.html", "/help/getting-started.html", "/help/faq.html",
+                "/help/pricing.html", "/help/refunds.html"), articles);
+        for (String article : articles) {
+            HttpResponse<String> page = get(article);
+            assertEquals(200, page.statusCode(), article);
+            assertTrue(page.body().contains("support@briefmessage.net"), article + " tells where to write");
+            assertTrue(page.body().contains("href=\"/help/index.html\""), article + " links back to the Help Center");
+        }
+        assertTrue(get("/help/pricing.html").body().contains("Free during early access"));
     }
 
     @Test

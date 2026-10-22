@@ -43,7 +43,7 @@ includes the Maven Wrapper (`mvnw`), which downloads Maven the first time you us
 
 ```powershell
 cd backend-spring
-.\mvnw.cmd test                    # 332 tests
+.\mvnw.cmd test                    # 333 tests
 .\mvnw.cmd package                 # builds target\brief-spring.jar
 java -jar target\brief-spring.jar  # open http://localhost:8080
 ```
@@ -87,7 +87,7 @@ docker compose up -d postgres                                        # PostgreSQ
 java -jar target\brief-spring.jar --spring.profiles.active=postgres
 ```
 
-**The tests on PostgreSQL.** The same 332 tests, with the end-to-end ones against a real PostgreSQL:
+**The tests on PostgreSQL.** The same 333 tests, with the end-to-end ones against a real PostgreSQL:
 
 ```powershell
 docker compose up -d postgres-test                                   # port 5433, starts empty every time
@@ -198,6 +198,8 @@ What the deployed application reads:
 - **Since 2.5:** invitations by email or by link from the person who runs a closed board; a "Check your email"
   step until a new address is confirmed; **Your account**, with what Brief! keeps and how to delete it all;
   Terms and Privacy pages.
+- **Since 2.6:** a **Help Center** (`/help/index.html`, the **Help** link beside Privacy): what Brief! is,
+  who it is for, getting started, an FAQ, pricing (free during early access) and the refund policy.
 - Posts of up to 255 characters, with the limit drawn as a ruler while you type.
 - **Links:** web addresses in posts open in a new tab, with or without `https://` in front
   (`pixelperfectapi.net` works). Posts are never treated as HTML.
@@ -296,7 +298,7 @@ one more class that implements `mail/Mailer.java`.
 - `POST /register` needs a usable invitation (see below); without one it answers 403. Five bad ones
   from one address lock that address out for 15 minutes.
 - Reading posts and members needs a sign-in (401 without).
-- The web app, `/health`, the API documentation, the Terms and Privacy pages and the mailed links stay
+- The web app, `/health`, the API documentation, the Terms and Privacy pages, the Help Center and the mailed links stay
   reachable without one.
 
 `GET /health` then says `"board": "closed"`, and the web app shows a sign-in page instead of the feed. To
@@ -365,6 +367,14 @@ If no prompt appeared and the page does not load, run this once in PowerShell **
 New-NetFirewallRule -DisplayName "Brief 8080" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow -Profile Private
 ```
 
+## Help Center (2.6)
+
+Plain pages in `frontend-spring/public/help/`, styled by `legal.css` like the Terms and Privacy pages, and
+copied into both backends by `npm run build`. Open **http://localhost:8080/help/index.html** (or click
+**Help**). To add an article: write `help/<name>.html` on the model of an existing one, and add it to the
+list in `help/index.html`. The test `ClosedBoardTest.theHelpCenterIsPublicAndEveryArticleItListsExists`
+checks that every article the list names answers, so it needs the new name too.
+
 ## API documentation
 
 With a backend running, open **http://localhost:8080/docs/index.html** (or click "API docs" in the app).
@@ -379,7 +389,7 @@ update that file too, then run `npm run build`.
 | Edition | Unit | End to end | Total |
 |---|---|---|---|
 | Javalin (`backend/`) | 39 | 40 | 79 |
-| Spring Boot (`backend-spring/`) | 215 | 117 | 332 |
+| Spring Boot (`backend-spring/`) | 215 | 118 | 333 |
 
 The end-to-end tests start the real application, call it over HTTP, and check status codes and JSON.
 The 41 cases the two editions share are the same; the Spring Boot edition adds 74 for what 2.1 to 2.5
@@ -397,6 +407,10 @@ second time against PostgreSQL 16, a build and start of the Docker image, and th
 
 - `docs/EDITIONS.md` - the Javalin and Spring Boot editions side by side.
 - `CHANGELOG.md` - what changed in each version.
+- `docs/Brief_OTSR_v7_October2026.pdf` - status report for 2.4.0 to 2.6.0: email on accounts, invitation
+  links, the independent review of 2.5.0, the deployments, what was verified live, what is open.
+- `docs/Brief_Launch_Roadmap_v4.pdf` - the roadmap after the closed board went live: paid plans before
+  November 10, the Help Center, 2.7 (push notifications), pricing stance, legal checklist.
 - `docs/Brief_OTSR_v6_October2026.pdf` - status report after the first deployment: 2.3.0 verified on your
   machine and on GitHub, live at briefmessage.net, what the deployment taught, what is open.
 - `docs/Brief_Launch_Roadmap_v3.pdf` - the roadmap after going live: what M0 to M2 took, the plan for 2.4
