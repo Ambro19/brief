@@ -43,7 +43,7 @@ includes the Maven Wrapper (`mvnw`), which downloads Maven the first time you us
 
 ```powershell
 cd backend-spring
-.\mvnw.cmd test                    # 333 tests
+.\mvnw.cmd test                    # 354 tests
 .\mvnw.cmd package                 # builds target\brief-spring.jar
 java -jar target\brief-spring.jar  # open http://localhost:8080
 ```
@@ -87,7 +87,7 @@ docker compose up -d postgres                                        # PostgreSQ
 java -jar target\brief-spring.jar --spring.profiles.active=postgres
 ```
 
-**The tests on PostgreSQL.** The same 333 tests, with the end-to-end ones against a real PostgreSQL:
+**The tests on PostgreSQL.** The same 354 tests, with the end-to-end ones against a real PostgreSQL:
 
 ```powershell
 docker compose up -d postgres-test                                   # port 5433, starts empty every time
@@ -152,11 +152,11 @@ uses that PostgreSQL database instead; the tables are created at the first start
 the token-signing key, and connects the two. After the first deploy, check the log for the line
 `Database: PostgreSQL, ...`.
 
-Two values are **not** filled in by `render.yaml`: `BRIEF_RESEND_API_KEY` (a secret) and `BRIEF_OWNER_USERNAME`.
+Three values are **not** filled in by `render.yaml`: `BRIEF_RESEND_API_KEY` and `BRIEF_RESEND_WEBHOOK_SECRET` (secrets) and `BRIEF_OWNER_USERNAME`.
 Add them under the service's **Environment** tab. **On a service that already exists, Render does not add a
 variable that a later `render.yaml` introduces either**: every new variable is listed in `CHANGELOG.md` under
 "Before you deploy", to be added by hand before pushing. The start-up log tells you what the application found,
-in the lines that start with `Board:`, `Owner:` and `Mail:`.
+in the lines that start with `Board:`, `Owner:`, `Mail:` and `Bounces:`.
 
 Since 2.4 Render deploys a commit only **after its checks on GitHub have passed** (`autoDeployTrigger: checksPass`).
 A push whose tests fail stays on GitHub.
@@ -173,6 +173,7 @@ What the deployed application reads:
 | `BRIEF_PUBLIC_URL` | `render.yaml`: `https://briefmessage.net` | Where the links in mails point |
 | `BRIEF_MAIL_FROM` | `render.yaml`: `Brief! <hello@briefmessage.net>` | The sender of the mails. Its domain must be verified at Resend |
 | `BRIEF_RESEND_API_KEY` | **you, in the dashboard** | The key of the mail service. Without it mails are written to the log, not sent |
+| `BRIEF_RESEND_WEBHOOK_SECRET` | **you, in the dashboard** | 2.7. The signing secret (`whsec_...`) of the Resend webhook to `/webhooks/resend`. Without it Brief! does not learn when a mail bounces |
 | `BRIEF_BOARD` | `render.yaml`: `closed` | `closed`: joining needs an invitation and reading a sign-in. `open`: anyone reads and joins |
 | `BRIEF_OWNER_USERNAME` | **you, in the dashboard** | The member who runs the board and sends invitations (on briefmessage.net: `AmbroLum`) |
 
@@ -198,6 +199,9 @@ What the deployed application reads:
 - **Since 2.5:** invitations by email or by link from the person who runs a closed board; a "Check your email"
   step until a new address is confirmed; **Your account**, with what Brief! keeps and how to delete it all;
   Terms and Privacy pages.
+- **Since 2.7:** when a mail **bounces** (a mistyped address, a mailbox that does not exist), Resend tells
+  Brief!, the member sees "We couldn't deliver your link" and is asked for the address again, and the board
+  owner sees "Bounced" next to the invitation. A bounced address is not mailed again for a day.
 - **Since 2.6:** a **Help Center** (`/help/index.html`, the **Help** link beside Privacy): what Brief! is,
   who it is for, getting started, an FAQ, pricing (free during early access) and the refund policy.
 - Posts of up to 255 characters, with the limit drawn as a ruler while you type.
@@ -293,6 +297,13 @@ login token of that account worthless, on every device.
 (`mail/ResendMailer.java`), otherwise into the log (`mail/LogMailer.java`). To use another service, write
 one more class that implements `mail/Mailer.java`.
 
+**Bounces (2.7).** Resend reports mail that could not be delivered to `POST /webhooks/resend`, signed with
+`BRIEF_RESEND_WEBHOOK_SECRET` (`mail/ResendWebhookVerifier.java`, `controller/ResendWebhookController.java`).
+The address is kept for 30 days (`service/EmailBounces.java`, table `email_bounce`): the member's page says the
+link could not be delivered, and for a day Brief! does not mail that address again (422). To set it up: in Resend,
+**Webhooks > Add Webhook**, URL `https://<your site>/webhooks/resend`, events `email.bounced` and
+`email.suppressed`; copy the signing secret into the variable.
+
 **A closed board.** Start the application with `BRIEF_BOARD=closed` (strict mode only) and:
 
 - `POST /register` needs a usable invitation (see below); without one it answers 403. Five bad ones
@@ -347,6 +358,7 @@ post it wrote, at once (web app: **Your account**). The board owner cannot delet
 | `BRIEF_INVITE_CODE` | empty | Spring only, 2.4. No longer used as a code since 2.5; set with no `BRIEF_BOARD`, it keeps the board closed |
 | `BRIEF_PUBLIC_URL` | `http://localhost:8080` | Spring only, 2.4. The address of the web app, used in mailed links |
 | `BRIEF_RESEND_API_KEY` | empty | Spring only, 2.4. The Resend API key. Empty = mails are written to the log. Never put a real key in a file that is committed |
+| `BRIEF_RESEND_WEBHOOK_SECRET` | empty | Spring only, 2.7. The Resend webhook's signing secret (`whsec_...`). Empty = `/webhooks/resend` answers 404 and bounces are not known |
 | `BRIEF_MAIL_FROM` | empty | Spring only, 2.4. The sender, for example `Brief! <hello@briefmessage.net>`. Required when the key is set |
 
 Locked yourself out while testing? Restart the server (the counts are in memory), or wait.
@@ -389,7 +401,7 @@ update that file too, then run `npm run build`.
 | Edition | Unit | End to end | Total |
 |---|---|---|---|
 | Javalin (`backend/`) | 39 | 40 | 79 |
-| Spring Boot (`backend-spring/`) | 215 | 118 | 333 |
+| Spring Boot (`backend-spring/`) | 225 | 129 | 354 |
 
 The end-to-end tests start the real application, call it over HTTP, and check status codes and JSON.
 The 41 cases the two editions share are the same; the Spring Boot edition adds 74 for what 2.1 to 2.5

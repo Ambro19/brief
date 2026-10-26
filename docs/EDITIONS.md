@@ -142,6 +142,16 @@ Read-time search versus write-time index:
 | Deleting an account | `service/AccountDeletionService.java` | The code deletes what the database cannot (posts, whose author must exist); the database deletes the rest through `on delete cascade` and `on delete set null` |
 | Static pages next to the app | `public/terms.html`, `privacy.html` | Plain HTML served by the same backend; no route, no code |
 
+## Added in 2.7 (Spring Boot edition only)
+
+| Feature | Where | The idea |
+|---|---|---|
+| Receiving a webhook | `controller/ResendWebhookController.java` | Another service calls Brief!. No login token: the signature is the authentication, and every unknown event is answered 200 so the sender never retries it |
+| Checking a signature | `mail/ResendWebhookVerifier.java` | HMAC-SHA256 over the raw body, a five-minute window against replays, and a comparison that takes the same time whatever differs |
+| The raw body | `@RequestBody String` | The signature covers the bytes as sent; reading them into objects first could change them |
+| A check and a write in one statement | `AccountTokenRepository.claim`, `InvitationRepository.claim` | `update ... where used_at is null`: the database decides who was first, not the application |
+| A new status code | `exception/UndeliverableAddressException.java` (422) | "This address cannot receive mail" is a different answer from "this address is taken" (400), so the web app can say the right thing |
+
 ## What the Spring edition does not have yet
 
 - springdoc-openapi to generate the API description from the code

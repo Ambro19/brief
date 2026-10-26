@@ -238,6 +238,12 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
         setError("This invitation no longer works: it was used, withdrawn, or it expired. Ask the person who invited you for a new one.");
       } else if (registering && !accountCreated && status === 429) {
         setError(`Too many tries from this connection. Try again in ${waitText((problem as ApiError).retryAfterSeconds)}.`);
+      } else if (registering && !accountCreated && status === 422) {
+        // 2.7: mail to this address bounced recently; most likely a typo.
+        reject(
+          "Mail to that address was refused less than a day ago: it may be mistyped, or the mailbox may not exist. Check the spelling.",
+          "email",
+        );
       } else if (registering && !accountCreated && status === 400) {
         // The server answers 400 without saying which rule was broken. What this form could not check itself:
         if (invitedAddress !== null)

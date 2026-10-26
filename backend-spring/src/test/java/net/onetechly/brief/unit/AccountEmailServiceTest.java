@@ -1,5 +1,7 @@
 package net.onetechly.brief.unit;
 
+import net.onetechly.brief.repository.EmailBounceRepository;
+import net.onetechly.brief.service.EmailBounces;
 import net.onetechly.brief.dto.Profile;
 import net.onetechly.brief.entity.Account;
 import net.onetechly.brief.entity.AccountToken;
@@ -37,6 +39,8 @@ import static org.mockito.Mockito.when;
  * the post office: LogMailer keeps what it was asked to send, so a test can read the mail.
  */
 class AccountEmailServiceTest {
+    private final EmailBounceRepository bounceTable = mock(EmailBounceRepository.class);
+
 
     private static final String ADDRESS = "ada@example.test";
 
@@ -57,7 +61,7 @@ class AccountEmailServiceTest {
     private AccountEmailService serviceFor(String mode) {
         AuthMode authMode = new AuthMode(mode);
         return new AccountEmailService(accounts, new AccountTokens(table.repository, now::get),
-                new AccountMails(mailbox, "https://brief.example"), new PasswordPolicy(authMode), authMode, new BoardOwner("Cy"), now::get);
+                new AccountMails(mailbox, "https://brief.example"), new PasswordPolicy(authMode), authMode, new BoardOwner("Cy"), new EmailBounces(bounceTable, now::get), now::get);
     }
 
     /** An account the mocked table knows, by id and (if it has one) by address. */
@@ -94,9 +98,9 @@ class AccountEmailServiceTest {
         stored(2, "Ben", "ben@example.test", false);
         stored(3, "Cy", "cy@example.test", true);
 
-        assertEquals(new Profile(1, "Ada", null, false, true, false), service.profile(1), "no address: nothing to wait for");
-        assertEquals(new Profile(2, "Ben", "ben@example.test", false, false, false), service.profile(2), "address given, not confirmed");
-        assertEquals(new Profile(3, "Cy", "cy@example.test", true, true, true), service.profile(3), "Cy runs the board (2.5)");
+        assertEquals(new Profile(1, "Ada", null, false, true, false, false), service.profile(1), "no address: nothing to wait for");
+        assertEquals(new Profile(2, "Ben", "ben@example.test", false, false, false, false), service.profile(2), "address given, not confirmed");
+        assertEquals(new Profile(3, "Cy", "cy@example.test", true, true, true, false), service.profile(3), "Cy runs the board (2.5)");
         assertThrows(NotFoundException.class, () -> service.profile(99));
     }
 

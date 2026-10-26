@@ -1,5 +1,6 @@
 package net.onetechly.brief.unit;
 
+import net.onetechly.brief.service.EmailBounces;
 import net.onetechly.brief.dto.AccountResponse;
 import net.onetechly.brief.dto.Credentials;
 import net.onetechly.brief.dto.PublicAccount;
@@ -41,6 +42,8 @@ import static org.mockito.Mockito.when;
  * The mock answers what each test tells it to, and records how it was called.
  */
 class AccountServiceTest {
+    private final EmailBounces bounces = mock(EmailBounces.class);
+
 
     private AccountRepository accounts;
     private AccountEmailService emailService;
@@ -62,7 +65,7 @@ class AccountServiceTest {
         AuthMode authMode = new AuthMode(mode);
         return new AccountService(accounts, new UsernamePolicy(authMode), new PasswordPolicy(authMode),
                 new EmailPolicy(authMode), new BoardAccess(authMode, board, ""), emailService,
-                invitations, new BoardOwner("AmbroLum"));
+                invitations, new BoardOwner("AmbroLum"), bounces);
     }
 
     /**

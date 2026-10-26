@@ -1,5 +1,134 @@
 # Changelog
 
+## 2.7.0 - 2026-10-23
+
+**Mail you can trust.** On October 21 a new member typed `lovepetschoice@` for `lovepetschoices@`. Gmail
+refused the mail, Resend recorded a bounce and blocked the address, and Brief! went on saying "Check your
+email" for a mail that would never arrive; "Send the link again" could not help. Brief! sent every mail it
+was asked to; what it lacked was any way to learn that one had not arrived. 2.7 gives it one. As agreed, one
+milestone: push notifications and longer sessions move to 2.8.
+
+**Read "Before you deploy" below before pushing this to GitHub: one new Render variable, and one webhook
+to add in Resend.**
+
+Spring Boot edition:
+
+- **`POST /webhooks/resend`.** Resend reports what happened to a mail after it left. Brief! acts on
+  `email.bounced` (permanent bounces only; a temporary one may still arrive) and `email.suppressed`, for mail
+  sent from its own domain, and acknowledges everything else, once per message. Each call must be
+  signed with the webhook's secret (`BRIEF_RESEND_WEBHOOK_SECRET`, "whsec_...") and be at most five minutes
+  old, as Svix, which delivers Resend's webhooks, specifies (`mail/ResendWebhookVerifier.java`, checked
+  against the example in Svix's documentation). Without the secret the address answers 404.
+- **Migration `V5__email_bounces.sql`:** one row per address that cannot receive mail: the address, what
+  happened, the receiving server's reason, the date. Rows are deleted after 30 days, and at once when the
+  address is confirmed after all or its account is deleted (`service/EmailBounces.java`).
+- **For a day after a bounce** Brief! does not mail that address: `POST /email/verification`,
+  `POST /accounts/{id}/email`, `POST /register` and `POST /invitations` answer **422**, and a password link is
+  not sent (the answer to the form stays the same, as always). After a day one more try is allowed and clears
+  the report; if it bounces again, Resend says so again. For 30 days `GET /me` reports `email_bounced`.
+- **Invitations:** the owner's list says `bounced` for an invitation whose mail could not be delivered, and
+  `taken` for one whose address is now a member's confirmed address (it can no longer create an account; one address,
+  one account). Both can be withdrawn.
+- **Confirmation and password links are used up in one database statement** (`AccountTokenRepository.claim`),
+  as invitations have been since the review of 2.5.0: two clicks on one password link at the same moment set
+  one password. Before, both could.
+- The start-up log has a fifth line, `Bounces: ...`, and warns when mail is sent through Resend without the
+  webhook secret.
+
+Web app (both editions):
+
+- **"We couldn't deliver your link"** takes the place of "Check your email" when the mail bounced: it names
+  the address, says it may be mistyped, and opens the form for another one. "Send the link again" is not
+  offered for a refused address. The page notices on its own within 15 seconds, as it already does for a
+  confirmation made on another device.
+- **Invite people:** "Bounced: check the address" in red, "Already a member", and Withdraw on both. Inviting
+  an address that bounced says so. The list is read again on Refresh and every 15 seconds while the page is
+  open, so a bounce shows up without leaving the page (until now the list was read once).
+- **Create account:** an address that bounced recently is pointed out under the email field.
+- **An old confirmation link** opened by a member whose address is already confirmed now says "Your email
+  address is already confirmed. There is nothing more to do." (from the live test of October 20).
+- **Help Center, FAQ:** "Brief! says it couldn't deliver my link" and "I was invited at an address that already
+  has an account"; Getting started asks to type the address carefully.
+- **Privacy notice:** a new row for addresses that mail could not be delivered to (kept 30 days), and Resend's
+  line says it reports undeliverable mail. **Read the new row before deploying.**
+- `docs/openapi.json` describes 2.7.0: 22 paths.
+
+### Before you deploy
+
+1. **In Resend:** Webhooks > Add Webhook. Endpoint URL `https://briefmessage.net/webhooks/resend`. Events:
+   `email.bounced` and `email.suppressed`. Save, then copy its **signing secret**
+   (it starts with `whsec_`). Never send it to anyone, me included.
+2. **In Render** (brief > Environment): add `BRIEF_RESEND_WEBHOOK_SECRET` with that secret, and save. 2.6, still
+   running, ignores it. (Render does not add variables from render.yaml to an existing service.)
+3. **Push 2.7.0.** The log must show `Migrating schema "public" to version "5 - email bounces"` and the line
+   `Bounces: Resend reports them to /webhooks/resend; ...`.
+4. **Check the webhook in Resend:** its page shows the deliveries it made and the answer Brief! gave (200).
+   Resend can also replay an event from there; a replayed bounce for an address in use shows up on that
+   member's page.
+
+If the variable is missing, Brief! learns of no bounce (as in 2.6), the log warns, and the webhook answers 404;
+the rest of 2.7 works. A report Resend sends before 2.7 is live is answered 404 and sent again later: nothing is lost.
+
+In your repository, after copying the zip over it: the web app's files are now `index-DTDoO4CX.js` and
+`index-C6TIDFPY.css`. From `C:\Users\xiggy\Brief_v2.3.0\brief`:
+
+```powershell
+Get-ChildItem backend-spring\src\main\resources\public\assets, backend\src\main\resources\public\assets -Filter "index-*" |
+  Where-Object { $_.Name -notin "index-DTDoO4CX.js", "index-C6TIDFPY.css" } | Remove-Item
+```
+
+Tests: 358 (was 333). 226 unit, 132 end-to-end. New: `EmailBounceTest` (the whole path from a
+signed report to what the member and the owner see), `ResendWebhookVerifierTest`, `EmailBouncesTest`, and
+in `StrictAuthTest` four simultaneous uses of one password link.
+
+Verification status at release:
+- **Not yet run with real Spring.** Expect `Tests run: 358`.
+- Run on the stand-in for Spring: all 358 tests on H2 and on PostgreSQL 16. The signature check agrees with the
+  example in Svix's documentation, which was not made with this code.
+- 29 deliberate bugs put into the new code after the review (each 422, each status, the timestamp window, the
+  signature comparison, the body limit, the replay check, the sender filter, the one-day and 30-day windows,
+  the hourly purge, the once-only password link, ...): the tests caught all 29 (22 of 22 in the round before the
+  review). The test of four simultaneous uses of one password link failed against the old code each of the
+  five times it was run, and passed five times out of five against the new.
+- Migration `V5` run on PostgreSQL over a database 2.3.0 had created (V3, V4 and V5 in turn).
+- The web app in Chromium, on PostgreSQL with a webhook secret, the script playing Resend with signed reports:
+  19 new checks (Mayayo's case end to end: the typo, the report, "We couldn't deliver your link" appearing on its
+  own, the same typo refused, the right address, the already-confirmed message; the owner's Bounced and Already
+  a member; sign-up with a bounced address; the Help and Privacy pages; a phone screen), and again the 33 checks
+  of 2.5, the 17 of 2.6, the 56 of 2.3 and the 10 of a 2.3.0 server.
+
+### Independent review
+
+A separate reviewer read 2.7.0 before release. No critical or high findings; the signature check, the raw body,
+the transactions around the new UPDATEs and the 422 placement were found sound. Fixed:
+
+- **No way out of a mistaken report** (medium): an address reported by mistake (suppressed because of another
+  sender on the same Resend account, say) would have blocked a member's confirmation and password mail for a
+  month, with nobody able to undo it. Now the block lasts a day; after it one more try is allowed.
+- **"Deleted after 30 days" was not kept** (medium): old reports were deleted only when a new one arrived. Now at
+  most once an hour from the member's page, the owner's list and every report.
+- **Spam complaints** blocked mail to the person who complained, including their own password link. No longer
+  acted on; Resend suppresses such an address itself.
+- **A huge unsigned body** was read into memory before the signature check (low-medium). Now the headers are
+  checked first and the body is read only up to 256 KB (413 above).
+- **Sender filter** used "contains", and accepted reports without a sender: now the exact domain of the address.
+- **Replays** inside the five-minute window: each Svix message id is handled once.
+- **"Already a member"** counted an address claimed but not confirmed: now only a confirmed one.
+- The already-confirmed notice and the 422 messages were reworded to be right in every case.
+
+Left as they are: 422 at sign-up tells that mail to an address was refused in the last day (it is shown only
+after every other check passed); the owner's list makes two look-ups per invitation (fine for a small board);
+a race between two first reports can put the address in Hibernate's error log line.
+
+Known limits:
+- Brief! learns of a bounce only through Resend's webhook. Mail written to the log (your computer) never
+  bounces.
+- A mailbox that is full or briefly down gives a temporary bounce, which Brief! ignores; if Resend gives up later,
+  it reports nothing more.
+- After "Create a link", making a second link still needs the page opened again (as in 2.5). For 2.8.
+- Bounces of mail sent before 2.7 are not known (Mayayo's address, for one). Sign in as Mayayo and use
+  "Use a different address" once.
+
 ## 2.6.0 - 2026-10-21
 
 **A Help Center.** Plain, short pages that say what Brief! is and how to use it, for members and for visitors

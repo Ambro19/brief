@@ -1054,6 +1054,15 @@ textarea {
   color: var(--accent);
 }
 
+/* 2.7: the mail bounced. Same step, in the colour of a problem, with the address form open. */
+.banner-bounced {
+  border-left-color: var(--danger);
+}
+
+.banner-bounced .check-icon {
+  color: var(--danger);
+}
+
 .banner-actions .btn {
   padding: 7px 16px;
 }
@@ -1134,6 +1143,12 @@ textarea {
 
 .invitations li[data-status="used"] .invitation-status {
   color: var(--accent);
+  font-weight: 600;
+}
+
+/* 2.7: an invitation whose mail bounced needs the owner's attention. */
+.invitations li[data-status="bounced"] .invitation-status {
+  color: var(--danger);
   font-weight: 600;
 }
 

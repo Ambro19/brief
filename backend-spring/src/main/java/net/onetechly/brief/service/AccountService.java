@@ -52,11 +52,12 @@ public class AccountService {
     private final AccountEmailService emailService;
     private final InvitationService invitations;
     private final BoardOwner owner;
+    private final EmailBounces bounces;
 
     /** Constructor injection: Spring sees the parameters and passes in the objects it created. */
     public AccountService(AccountRepository accounts, UsernamePolicy usernamePolicy, PasswordPolicy passwordPolicy,
                           EmailPolicy emailPolicy, BoardAccess board, AccountEmailService emailService,
-                          InvitationService invitations, BoardOwner owner) {
+                          InvitationService invitations, BoardOwner owner, EmailBounces bounces) {
         this.accounts = accounts;
         this.usernamePolicy = usernamePolicy;
         this.passwordPolicy = passwordPolicy;
@@ -65,6 +66,7 @@ public class AccountService {
         this.emailService = emailService;
         this.invitations = invitations;
         this.owner = owner;
+        this.bounces = bounces;
     }
 
     /**
@@ -124,6 +126,11 @@ public class AccountService {
         // One address, one account.
         if (email != null && accounts.findByEmail(email).isPresent()) {
             throw new BadRequestException();
+        }
+        // 2.7: an address whose mail bounced recently would leave the new member waiting for a
+        // link that never comes. 422, and the form asks them to check the spelling.
+        if (email != null && invitedAddress == null) {
+            bounces.allowSending(email);
         }
         Account account = new Account(registration.username(), PasswordHasher.hash(registration.password()));
         if (email != null) {

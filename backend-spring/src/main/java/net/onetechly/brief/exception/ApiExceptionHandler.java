@@ -65,6 +65,16 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).build();
     }
 
+    /**
+     * 2.7: the request would mail an address that bounced recently. 422 Unprocessable Entity:
+     * the request is well formed, but this address cannot be used. Distinct from 400 so that the
+     * web app can say "that address does not receive mail" and not "that address is taken".
+     */
+    @ExceptionHandler(UndeliverableAddressException.class)
+    public ResponseEntity<Void> undeliverable(UndeliverableAddressException e) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).build();
+    }
+
     /** Too many failed logins. Retry-After tells the client how many seconds to wait. */
     @ExceptionHandler(TooManyRequestsException.class)
     public ResponseEntity<Void> tooManyRequests(TooManyRequestsException e) {

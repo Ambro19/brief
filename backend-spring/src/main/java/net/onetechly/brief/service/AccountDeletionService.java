@@ -25,6 +25,7 @@ import java.util.List;
  *   and rows that mention the member   deleted by the database (on delete cascade, V2)
  *   its emailed links (account_token)  deleted by the database (on delete cascade, V3)
  *   invitations it sent                deleted by the database (on delete cascade, V4)
+ *   a bounce report on its address     deleted here (2.7)
  *   invitations it was created with    deleted here: a mailed one holds the member's address
  *                                      (until the review of 2.5.0 the row stayed, with used_by
  *                                      emptied by "on delete set null", and kept the address)
@@ -39,13 +40,15 @@ public class AccountDeletionService {
     private final AccountRepository accounts;
     private final MessageRepository messages;
     private final InvitationRepository invitations;
+    private final EmailBounces bounces;
     private final BoardOwner owner;
 
     public AccountDeletionService(AccountRepository accounts, MessageRepository messages,
-                                  InvitationRepository invitations, BoardOwner owner) {
+                                  InvitationRepository invitations, EmailBounces bounces, BoardOwner owner) {
         this.accounts = accounts;
         this.messages = messages;
         this.invitations = invitations;
+        this.bounces = bounces;
         this.owner = owner;
     }
 
@@ -70,6 +73,9 @@ public class AccountDeletionService {
             messages.deleteAll(posts);
         }
         invitations.deleteByUsedBy(accountId); // the invitation this member joined with, and the address in it
+        if (account.getEmail() != null) {
+            bounces.forget(account.getEmail()); // 2.7: a bounce report about the address goes too
+        }
         accounts.delete(account);
     }
 

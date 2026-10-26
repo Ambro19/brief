@@ -53,25 +53,27 @@ public class AccountEmailService {
     private final PasswordPolicy passwordPolicy;
     private final AuthMode mode;
     private final BoardOwner owner;
+    private final EmailBounces bounces;
     private final LongSupplier clockSeconds;
 
     /** The constructor Spring uses. */
     @Autowired
     public AccountEmailService(AccountRepository accounts, AccountTokens tokens, AccountMails mails,
-                               PasswordPolicy passwordPolicy, AuthMode mode, BoardOwner owner) {
-        this(accounts, tokens, mails, passwordPolicy, mode, owner, () -> System.currentTimeMillis() / 1000);
+                               PasswordPolicy passwordPolicy, AuthMode mode, BoardOwner owner, EmailBounces bounces) {
+        this(accounts, tokens, mails, passwordPolicy, mode, owner, bounces, () -> System.currentTimeMillis() / 1000);
     }
 
     /** The clock is injectable so tests can move time forward without sleeping. */
     public AccountEmailService(AccountRepository accounts, AccountTokens tokens, AccountMails mails,
                                PasswordPolicy passwordPolicy, AuthMode mode, BoardOwner owner,
-                               LongSupplier clockSeconds) {
+                               EmailBounces bounces, LongSupplier clockSeconds) {
         this.accounts = accounts;
         this.tokens = tokens;
         this.mails = mails;
         this.passwordPolicy = passwordPolicy;
         this.mode = mode;
         this.owner = owner;
+        this.bounces = bounces;
         this.clockSeconds = clockSeconds;
     }
 
@@ -81,8 +83,10 @@ public class AccountEmailService {
     }
 
     private Profile profileOf(Account account) {
+        bounces.purgeOld(); // 2.7: at most once an hour; keeps the 30-day promise of the Privacy notice
         return new Profile(account.getAccountId(), account.getUsername(), account.getEmail(),
-                account.isEmailVerified(), mayPost(account), owner.isOwner(account));
+                account.isEmailVerified(), mayPost(account), owner.isOwner(account),
+                account.getEmail() != null && bounces.isBounced(account.getEmail()));
     }
 
     /** In strict mode a member who gave an address must have confirmed it. In compat mode nothing is asked. */
@@ -115,6 +119,7 @@ public class AccountEmailService {
      * Gives the account an address, or replaces one that was never confirmed, and mails the
      * confirmation link. 400 if the text is not an address, if another account has it, or if
      * the account's address is already confirmed: changing a confirmed address is not part of 2.4.
+     * 422 (2.7) if mail to that address bounced in the last day: the same typo, entered again.
      */
     @Transactional
     public Profile setEmail(int accountId, String email) {
@@ -127,6 +132,7 @@ public class AccountEmailService {
         if (holder.isPresent() && !holder.get().getAccountId().equals(accountId)) {
             throw new BadRequestException();
         }
+        bounces.allowSending(address);
         account.setEmail(address);
         try {
             // saveAndFlush, not save: an UPDATE is normally sent to the database when the transaction
@@ -143,7 +149,9 @@ public class AccountEmailService {
 
     /**
      * Mails the confirmation link again. 400 if there is nothing to confirm; 429 with
-     * Retry-After if the last one was sent less than a minute ago.
+     * Retry-After if the last one was sent less than a minute ago; 422 (2.7) if mail to the
+     * address bounced in the last day: sending again would only bounce again, so the member is
+     * asked for another address. After a day one more try is allowed (EmailBounces.allowSending).
      */
     @Transactional
     public void resendVerification(int accountId) {
@@ -151,6 +159,7 @@ public class AccountEmailService {
         if (!account.isWaitingForVerification()) {
             throw new BadRequestException();
         }
+        bounces.allowSending(account.getEmail());
         long since = tokens.secondsSinceLastIssue(accountId, AccountToken.VERIFY);
         if (since >= 0 && since < MAIL_INTERVAL_SECONDS) {
             throw new TooManyRequestsException(MAIL_INTERVAL_SECONDS - since);
@@ -171,6 +180,7 @@ public class AccountEmailService {
         }
         account.setEmailVerifiedAt(clockSeconds.getAsLong());
         accounts.save(account);
+        bounces.forget(account.getEmail()); // the link was opened, so the mail did arrive after all
     }
 
     /**
@@ -187,8 +197,8 @@ public class AccountEmailService {
             return;
         }
         Optional<Account> found = accounts.findByEmail(address);
-        if (found.isEmpty() || !found.get().isEmailVerified()) {
-            return;
+        if (found.isEmpty() || !found.get().isEmailVerified() || bounces.isBlocked(address)) {
+            return; // refused in the last day: the link would not arrive; the answer stays the same
         }
         Account account = found.get();
         long since = tokens.secondsSinceLastIssue(account.getAccountId(), AccountToken.RESET);

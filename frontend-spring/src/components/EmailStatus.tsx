@@ -32,6 +32,9 @@ function askedForLater(accountId: number): boolean {
  *   No address yet       An account from before 2.4. It asks for one, and can be put off.
  *   Address unconfirmed  It says where the link went, and offers to send it again or to
  *                        correct the address. Posting waits until the link has been opened.
+ *   Mail bounced (2.7)   Resend reported that the mail could not be delivered. It says so, in
+ *                        place of "Check your email", and asks for a different address; sending
+ *                        again would only bounce again, so that is not offered.
  */
 export function EmailStatus({ session, profile, onProfile, onSessionEnded, onReload }: Props) {
   const [email, setEmail] = useState("");
@@ -45,6 +48,7 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
   } | null>(null);
 
   const hasAddress = profile.email !== null;
+  const bounced = hasAddress && profile.email_bounced === true;
   if (hasAddress && profile.email_verified) return null;
   if (!hasAddress && later) return null;
 
@@ -75,7 +79,12 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
       setEmail("");
       setNote({ text: "Saved. The link is on its way.", tone: "good" });
     } catch (problem) {
-      failed(problem, "That address can't be used: another account has it, or it isn't a valid address.");
+      if (problem instanceof ApiError && problem.status === 422)
+        setNote({
+          text: "Mail to that address was refused less than a day ago. Check the spelling, or use another address.",
+          tone: "bad",
+        });
+      else failed(problem, "That address can't be used: another account has it, or it isn't a valid address.");
     } finally {
       setBusy(false);
     }
@@ -96,6 +105,8 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
           text: "A link was sent less than a minute ago. Give it a moment, then try again.",
           tone: "bad",
         });
+      } else if (problem instanceof ApiError && problem.status === 422) {
+        onReload(); // 2.7: the mail bounced in the meantime; the panel changes to say so
       } else if (problem instanceof ApiError && problem.status === 400) {
         onReload(); // nothing is waiting to be confirmed any more: the address was confirmed somewhere else
       } else {
@@ -115,11 +126,26 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
     }
   }
 
-  const showForm = !hasAddress || editing;
+  const showForm = !hasAddress || editing || bounced;
 
   return (
-    <section className={hasAddress ? "banner banner-check" : "banner"} aria-label="Your email address">
-      {hasAddress ? (
+    <section
+      className={bounced ? "banner banner-check banner-bounced" : hasAddress ? "banner banner-check" : "banner"}
+      aria-label="Your email address"
+    >
+      {bounced ? (
+        <>
+          <svg className="check-icon" viewBox="0 0 48 48" aria-hidden="true">
+            <rect x="5" y="11" width="38" height="27" rx="5" fill="none" stroke="currentColor" strokeWidth="3" />
+            <path d="M17 19l14 14M31 19L17 33" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+          </svg>
+          <p className="banner-title">We couldn't deliver your link</p>
+          <p>
+            Mail to <strong>{profile.email}</strong> was refused: the address may be mistyped, or the mailbox may not exist. Enter the
+            address again, and we'll send a new link to it. If you're sure it was right, you can try it again after a day.
+          </p>
+        </>
+      ) : hasAddress ? (
         <>
           {/* 2.5: a full step of its own, in place of the post box, rather than a strip above it. */}
           <svg className="check-icon" viewBox="0 0 48 48" aria-hidden="true">
@@ -173,9 +199,11 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
           <button type="submit" className="btn btn-primary" disabled={busy}>
             {busy ? "Saving…" : hasAddress ? "Save and send link" : "Save"}
           </button>
-          <button type="button" className="link" onClick={hasAddress ? () => setEditing(false) : notNow}>
-            {hasAddress ? "Cancel" : "Not now"}
-          </button>
+          {!bounced && (
+            <button type="button" className="link" onClick={hasAddress ? () => setEditing(false) : notNow}>
+              {hasAddress ? "Cancel" : "Not now"}
+            </button>
+          )}
         </form>
       ) : (
         <p className="banner-actions">

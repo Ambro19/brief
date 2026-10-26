@@ -92,12 +92,17 @@ public class AccountTokens {
         return found;
     }
 
-    /** Uses a link: as find, and marks the link used, so that it does not work a second time. */
+    /**
+     * Uses a link: as find, and marks the link used, so that it does not work a second time.
+     *
+     * Until 2.7 this set used_at on the object and saved it: "read, check, write", the pattern the
+     * review of 2.5.0 found unsafe for invitations when two requests arrive together. Now the
+     * database decides in one UPDATE (AccountTokenRepository.claim); the loser gets nothing.
+     */
     public Optional<AccountToken> redeem(String secret, String purpose) {
         Optional<AccountToken> found = find(secret, purpose);
-        if (found.isPresent()) {
-            found.get().setUsedAt(clockSeconds.getAsLong());
-            tokens.save(found.get());
+        if (found.isEmpty() || tokens.claim(found.get().getTokenId(), clockSeconds.getAsLong()) != 1) {
+            return Optional.empty();
         }
         return found;
     }

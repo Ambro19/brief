@@ -6,6 +6,8 @@ import type { InvitationView, Session } from "../types";
 
 interface Props {
   session: Session;
+  /** 2.7: changes on Refresh and every 15 seconds; the list of sent invitations is read again, so "Bounced" appears without reopening the page. */
+  refreshKey?: number;
   /** The server no longer accepts this session (401). */
   onSessionEnded: () => void;
 }
@@ -14,7 +16,14 @@ const STATUS_TEXT: Record<InvitationView["status"], string> = {
   pending: "Waiting",
   used: "Joined",
   expired: "Expired",
+  // 2.7: Resend reported that the mail could not be delivered; the address is probably mistyped.
+  bounced: "Bounced: check the address",
+  // 2.7: the address now belongs to a member, so this invitation can no longer create an account.
+  taken: "Already a member",
 };
+
+/** Unused invitations that can still be withdrawn (the server allows it for every unused one). */
+const WITHDRAWABLE: ReadonlyArray<InvitationView["status"]> = ["pending", "bounced", "taken"];
 
 /**
  * "Invite people" (2.5), for the member who runs the board.
@@ -25,7 +34,7 @@ const STATUS_TEXT: Record<InvitationView["status"], string> = {
  *              member gives an address when joining and confirms it as usual.
  * Below them, everything sent so far; an invitation that is still waiting can be withdrawn.
  */
-export function InvitePanel({ session, onSessionEnded }: Props) {
+export function InvitePanel({ session, refreshKey = 0, onSessionEnded }: Props) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{
@@ -49,12 +58,17 @@ export function InvitePanel({ session, onSessionEnded }: Props) {
 
   useEffect(() => {
     void reload();
-    // Read once when the panel opens; every action below reads again.
+    // Read when the panel opens, on Refresh and every 15 seconds (2.7); every action below reads again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.token]);
+  }, [session.token, refreshKey]);
 
   function failed(problem: unknown, otherwise: string) {
     if (problem instanceof ApiError && problem.status === 401) onSessionEnded();
+    else if (problem instanceof ApiError && problem.status === 422)
+      setNote({
+        text: "Mail to that address was refused less than a day ago, so it isn't sent again yet. Check the spelling, then try the corrected address.",
+        tone: "bad",
+      });
     else if (problem instanceof ApiError && problem.status === 429)
       setNote({
         text: "That's 50 invitations today, the daily limit. Try again tomorrow.",
@@ -212,7 +226,7 @@ export function InvitePanel({ session, onSessionEnded }: Props) {
                     ? `Joined as ${invitation.joined_as}`
                     : `${STATUS_TEXT[invitation.status]} · sent ${relativeTime(invitation.created_at)}`}
                 </span>
-                {invitation.status === "pending" && (
+                {WITHDRAWABLE.includes(invitation.status) && (
                   <button type="button" className="link" onClick={() => void withdraw(invitation)}>
                     Withdraw
                   </button>

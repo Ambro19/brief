@@ -1,5 +1,7 @@
 package net.onetechly.brief.unit;
 
+import net.onetechly.brief.repository.EmailBounceRepository;
+import net.onetechly.brief.service.EmailBounces;
 import net.onetechly.brief.dto.InvitationLink;
 import net.onetechly.brief.dto.InvitationView;
 import net.onetechly.brief.entity.Account;
@@ -45,6 +47,8 @@ import static org.mockito.Mockito.when;
  * LogMailer, which keeps what it was asked to send.
  */
 class InvitationServiceTest {
+    private final EmailBounceRepository bounceTable = mock(EmailBounceRepository.class);
+
 
     private static final int OWNER = 1;
     private static final int MEMBER = 2;
@@ -114,7 +118,7 @@ class InvitationServiceTest {
                 .when(table).deleteByUsedAtIsNullAndExpiresAtLessThan(anyLong());
 
         service = new InvitationService(table, accounts, new AccountMails(mailbox, "https://brief.example"),
-                new BoardOwner("ambrolum"), 7, now::get);
+                new BoardOwner("ambrolum"), new EmailBounces(bounceTable, now::get), 7, now::get);
     }
 
     private void stored(int id, String username, String email) {
@@ -288,7 +292,7 @@ class InvitationServiceTest {
         assertTrue(service.usable(secret).isPresent());
 
         InvitationService afterHandover = new InvitationService(table, accounts, new AccountMails(mailbox, "https://brief.example"),
-                new BoardOwner("Gilberto"), 7, now::get);
+                new BoardOwner("Gilberto"), new EmailBounces(bounceTable, now::get), 7, now::get);
         assertTrue(afterHandover.usable(secret).isEmpty(), "AmbroLum no longer runs the board");
         assertTrue(afterHandover.lookup(secret).isEmpty());
     }

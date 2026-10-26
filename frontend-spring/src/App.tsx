@@ -110,6 +110,8 @@ export default function App() {
   /** The secret of a password link the page was opened with, until it is used or put aside. */
   const [resetSecret, setResetSecret] = useState<string | null>(mailedLink?.kind === "reset" ? mailedLink.secret : null);
   const [pageNotice, setPageNotice] = useState<PageNotice | null>(null);
+  /** 2.7: counts up on Refresh and on every poll, so "Invite people" re-reads its list (a bounce arrives seconds after sending). */
+  const [inviteTick, setInviteTick] = useState(0);
   /** An invitation link this page was opened with, once the server has said it still works (2.5). */
   const [invitation, setInvitation] = useState<OpenInvitation | null>(null);
   const [view, setView] = useState<View>(() => viewFromHash(window.location.hash));
@@ -340,10 +342,37 @@ export default function App() {
           );
         })();
       } else if (outcome === "refused") {
-        setPageNotice({
+        const refused = {
           text: "That confirmation link has expired or was already used. Sign in to have a new one sent.",
-          tone: "bad",
-        });
+          tone: "bad" as const,
+        };
+        if (currentMember.current === null) {
+          setPageNotice(refused);
+          return;
+        }
+        // 2.7: someone is signed in. An old link opened by a member whose address is already
+        // confirmed is not a problem, and should not read like one (live test, October 20).
+        void (async () => {
+          try {
+            if (serverKnown.current === null) await loadServer();
+          } catch {
+            /* the status line reports an unreachable server */
+          }
+          const mine = await latestLoadProfile.current();
+          if (!stillHere) return;
+          setPageNotice(
+            mine !== null && mine.email_verified
+              ? {
+                  text: "That link was already used. The address of the account signed in here is confirmed: there is nothing more to do.",
+                  tone: "good",
+                }
+              : mine !== null && mine.email_bounced
+                ? { text: "That confirmation link no longer works. Enter your address again below, and a new one is sent.", tone: "bad" }
+                : mine !== null && mine.email !== null
+                  ? { text: "That confirmation link has expired or was already used. Use “Send the link again” below.", tone: "bad" }
+                  : refused,
+          );
+        })();
       } else {
         setPageNotice({
           text: "The server isn't responding, so the address could not be confirmed. Open the link in the mail again in a moment.",
@@ -415,6 +444,7 @@ export default function App() {
     void loadMentions();
     // While posting waits for the address to be confirmed, keep looking: the link is often opened on another device.
     if (profile !== null && !profile.can_post) void loadProfile();
+    if (!document.hidden && view.kind === "invite") setInviteTick((tick) => tick + 1);
   };
   /** The newest loadProfile, for code that started before the member signed in. */
   const latestLoadProfile = useRef(loadProfile);
@@ -747,6 +777,7 @@ export default function App() {
                   void refresh();
                   void loadMentions();
                   void loadProfile();
+                  setInviteTick((tick) => tick + 1);
                 }}
               >
                 Refresh
@@ -765,7 +796,7 @@ export default function App() {
         )}
 
         {session && panel === "invite" ? (
-          <InvitePanel session={session} onSessionEnded={() => endSession("Your session ended. Sign in again.")} />
+          <InvitePanel session={session} refreshKey={inviteTick} onSessionEnded={() => endSession("Your session ended. Sign in again.")} />
         ) : session && panel === "account" ? (
           <AccountPanel
             session={session}

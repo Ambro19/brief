@@ -3,6 +3,7 @@ package net.onetechly.brief.config;
 import net.onetechly.brief.mail.AccountMails;
 import net.onetechly.brief.mail.LogMailer;
 import net.onetechly.brief.mail.Mailer;
+import net.onetechly.brief.mail.ResendWebhookVerifier;
 import net.onetechly.brief.repository.AccountRepository;
 import net.onetechly.brief.security.BoardAccess;
 import net.onetechly.brief.security.BoardOwner;
@@ -15,7 +16,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * Writes a few lines to the log when the application has started: which database it is using
- * (2.3), whether the board is open or closed, and how mail is sent (2.4).
+ * (2.3), whether the board is open or closed, and how mail is sent (2.4), who the owner is (2.5),
+ * and whether Brief! learns about mail that bounced (2.7).
  *
  * On your own machine that is the H2 file, and all is well. On a hosting platform the same
  * line is the quickest way to notice a mistake that otherwise shows no symptom: if the
@@ -37,16 +39,18 @@ public class StartupReport implements ApplicationRunner {
     private final AccountMails mails;
     private final BoardOwner owner;
     private final AccountRepository accounts;
+    private final ResendWebhookVerifier webhook;
 
     public StartupReport(@Value("${spring.datasource.url}") String datasourceUrl,
                          BoardAccess board, Mailer mailer, AccountMails mails, BoardOwner owner,
-                         AccountRepository accounts) {
+                         AccountRepository accounts, ResendWebhookVerifier webhook) {
         this.datasourceUrl = datasourceUrl;
         this.board = board;
         this.mailer = mailer;
         this.mails = mails;
         this.owner = owner;
         this.accounts = accounts;
+        this.webhook = webhook;
     }
 
     @Override
@@ -72,6 +76,22 @@ public class StartupReport implements ApplicationRunner {
                     + "links. Set BRIEF_RESEND_API_KEY and BRIEF_MAIL_FROM in the service's environment.", mailLine);
         } else {
             log.info(mailLine);
+        }
+        reportBounces(mailer instanceof LogMailer);
+    }
+
+    /**
+     * The bounce line (2.7). Mail sent through Resend without the webhook secret still works, but
+     * a mistyped address leaves its owner waiting for a mail that never comes, as on October 21.
+     */
+    private void reportBounces(boolean mailOnlyLogged) {
+        if (webhook.isConfigured()) {
+            log.info("Bounces: Resend reports them to /webhooks/resend; mail to an address that bounced is not sent again.");
+        } else if (mailOnlyLogged) {
+            log.info("Bounces: not reported (no mail service, and BRIEF_RESEND_WEBHOOK_SECRET is not set).");
+        } else {
+            log.warn("Bounces: not reported. Set BRIEF_RESEND_WEBHOOK_SECRET (Resend > Webhooks) so that Brief! learns when "
+                    + "a mail cannot be delivered; without it, a mistyped address leaves its owner waiting for a mail that never comes.");
         }
     }
 

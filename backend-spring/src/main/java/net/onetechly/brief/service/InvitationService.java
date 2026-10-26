@@ -59,6 +59,7 @@ public class InvitationService {
     private final AccountRepository accounts;
     private final AccountMails mails;
     private final BoardOwner owner;
+    private final EmailBounces bounces;
     private final long lifetimeSeconds;
     private final LongSupplier clockSeconds;
     private final SecureRandom random = new SecureRandom();
@@ -66,17 +67,18 @@ public class InvitationService {
     /** The constructor Spring uses. */
     @Autowired
     public InvitationService(InvitationRepository invitations, AccountRepository accounts, AccountMails mails,
-                             BoardOwner owner, @Value("${brief.invitation-days:7}") int days) {
-        this(invitations, accounts, mails, owner, days, () -> System.currentTimeMillis() / 1000);
+                             BoardOwner owner, EmailBounces bounces, @Value("${brief.invitation-days:7}") int days) {
+        this(invitations, accounts, mails, owner, bounces, days, () -> System.currentTimeMillis() / 1000);
     }
 
     /** The clock is injectable so tests can move time forward without sleeping. */
     public InvitationService(InvitationRepository invitations, AccountRepository accounts, AccountMails mails,
-                             BoardOwner owner, int days, LongSupplier clockSeconds) {
+                             BoardOwner owner, EmailBounces bounces, int days, LongSupplier clockSeconds) {
         this.invitations = invitations;
         this.accounts = accounts;
         this.mails = mails;
         this.owner = owner;
+        this.bounces = bounces;
         this.lifetimeSeconds = (long) Math.max(1, days) * 24 * 60 * 60;
         this.clockSeconds = clockSeconds;
     }
@@ -109,6 +111,7 @@ public class InvitationService {
         if (accounts.findByEmail(address).isPresent()) {
             throw new BadRequestException(); // already a member
         }
+        bounces.allowSending(address); // 422 (2.7): it bounced in the last day; most likely a typo
         requireUnderDailyLimit(callerId);
         List<Invitation> earlier = invitations.findByEmailAndUsedAtIsNull(address);
         if (!earlier.isEmpty()) {
@@ -139,6 +142,7 @@ public class InvitationService {
     public List<InvitationView> list(int callerId) {
         requireOwner(callerId);
         forgetLongExpired();
+        bounces.purgeOld();
         List<InvitationView> out = new ArrayList<>();
         for (Invitation invitation : invitations.findByInviterIdOrderByInvitationIdDesc(callerId)) {
             out.add(view(invitation));
@@ -228,8 +232,21 @@ public class InvitationService {
         return ENCODER.encodeToString(bytes);
     }
 
+    /**
+     * How the owner's list describes an invitation:
+     *   used       an account was created with it
+     *   expired    seven days passed
+     *   bounced    (2.7) the mail could not be delivered: the address is probably mistyped
+     *   taken      (2.7) the address is now the confirmed address of a member, so it can no longer create an account
+     *   pending    waiting to be opened
+     */
     private InvitationView view(Invitation invitation) {
-        String status = invitation.isUsed() ? "used" : invitation.isUsableAt(now()) ? "pending" : "expired";
+        String email = invitation.getEmail();
+        String status = invitation.isUsed() ? "used"
+                : !invitation.isUsableAt(now()) ? "expired"
+                : email != null && bounces.isBounced(email) ? "bounced"
+                : email != null && accounts.findByEmail(email).filter(Account::isEmailVerified).isPresent() ? "taken"
+                : "pending";
         String joinedAs = invitation.getUsedBy() == null ? null
                 : accounts.findById(invitation.getUsedBy()).map(Account::getUsername).orElse(null);
         return new InvitationView(invitation.getInvitationId(), invitation.getEmail(), invitation.getCreatedAt(),

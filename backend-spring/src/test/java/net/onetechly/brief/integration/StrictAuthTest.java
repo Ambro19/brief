@@ -592,4 +592,46 @@ class StrictAuthTest extends ApiTestBase {
         assertEquals(403, send("POST", "/register", registrationJson("guest", "secret12", "guest@example.test", "made-up"), null).statusCode());
         assertEquals(200, send("POST", "/register", registrationJson("guest", "secret12", "guest@example.test"), null).statusCode());
     }
+
+    // ------------------------------------------------------------------ 2.7
+
+    @Test
+    void withoutAWebhookSecretTheWebhookAddressDoesNotExist() throws Exception {
+        assertEquals(404, send("POST", "/webhooks/resend", "{\"type\":\"email.bounced\"}", null).statusCode());
+        assertFalse(mapper.readTree(send("GET", "/me", null, registerConfirmed("Ada", "secret12")).body()).get("email_bounced").asBoolean());
+    }
+
+    @Test
+    void onePasswordLinkSentFromTwoPlacesAtOnceSetsOnePassword() throws Exception {
+        // 2.7: the same once-only rule as invitations (review of 2.5.0). Before, both could pass.
+        registerSecondUser();
+        send("POST", "/password/forgot", emailJson("second@example.test"), null);
+        String secret = secretMailedTo("second@example.test", "reset");
+        int tries = 4;
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(tries);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        java.util.List<java.util.concurrent.Future<Integer>> answers = new java.util.ArrayList<>();
+        try {
+            for (int i = 0; i < tries; i++) {
+                String password = "brandnew" + (10 + i);
+                answers.add(pool.submit(() -> {
+                    start.await();
+                    return send("POST", "/password/reset", resetJson(secret, password), null).statusCode();
+                }));
+            }
+            start.countDown();
+            int accepted = 0;
+            for (java.util.concurrent.Future<Integer> answer : answers) {
+                int status = answer.get();
+                if (status == 200) {
+                    accepted++;
+                } else {
+                    assertTrue(status == 400 || status == 409, "refused, not broken: " + status);
+                }
+            }
+            assertEquals(1, accepted, "one link, one new password");
+        } finally {
+            pool.shutdownNow();
+        }
+    }
 }

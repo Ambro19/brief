@@ -9,9 +9,9 @@
 #
 # Field names follow https://render.com/docs/blueprint-spec (checked October 11, 2026).
 #
-# Two variables are not filled in by this file: BRIEF_RESEND_API_KEY, a secret, and
-# BRIEF_OWNER_USERNAME, which differs from one deployment to the next (both "sync: false").
-# The start-up log says what the application found: the lines "Board:", "Owner:" and "Mail:".
+# Three variables are not filled in by this file: BRIEF_RESEND_API_KEY and BRIEF_RESEND_WEBHOOK_SECRET,
+# secrets, and BRIEF_OWNER_USERNAME, which differs from one deployment to the next ("sync: false").
+# The start-up log says what the application found: the lines "Board:", "Owner:", "Mail:" and "Bounces:".
 
 services:
   - type: web
@@ -49,6 +49,11 @@ services:
       # The key for Resend, the service that delivers the mails. A secret: set it in the dashboard.
       # Without it nothing is sent; each mail is written to the log instead, and the log says so.
       - key: BRIEF_RESEND_API_KEY
+        sync: false
+      # 2.7: the signing secret ("whsec_...") of the webhook through which Resend reports mail that
+      # bounced (events email.bounced and email.suppressed), made in Resend > Webhooks for https://briefmessage.net/webhooks/resend. A secret.
+      # Without it Brief! does not learn of bounces, and the log says so.
+      - key: BRIEF_RESEND_WEBHOOK_SECRET
         sync: false
       # Closed: creating an account needs an invitation link, and reading needs a sign-in (2.5).
       # "open" lets anyone read and join.

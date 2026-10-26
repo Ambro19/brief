@@ -63,6 +63,11 @@
             <td>The person who sent the invitation</td>
           </tr>
           <tr>
+            <td>Addresses that mail could not be delivered to, the date, and the reason the receiving server gave</td>
+            <td>So that Brief! can tell you your link did not arrive, and does not mail a refused address again. Deleted after 30 days, or earlier when the address is confirmed, tried again, or its account is deleted.</td>
+            <td>You, and the person who invited you if it was an invitation</td>
+          </tr>
+          <tr>
             <td>Your network (IP) address</td>
             <td>To slow down someone guessing passwords or invitation links. Kept only in the running server's memory, never in the database, and forgotten when the server restarts.</td>
             <td>Nobody; see also "Services we use"</td>
@@ -78,7 +83,7 @@
       <p>Brief! runs on three services that handle data for us, and for no other purpose:</p>
       <ul>
         <li><strong>Render</strong> (Render Services, Inc., United States) hosts the application and its database. Its logs record visits, including network addresses.</li>
-        <li><strong>Resend</strong> (United States) delivers the emails Brief! sends: confirmations, password links and invitations.</li>
+        <li><strong>Resend</strong> (United States) delivers the emails Brief! sends: confirmations, password links and invitations. It tells Brief! when one cannot be delivered.</li>
         <li><strong>Cloudflare</strong> (United States) provides the domain name and forwards mail sent to support@briefmessage.net.</li>
       </ul>
       <p>Each keeps data only as long as its own service needs. We do not sell, rent or share your data with anyone else.</p>

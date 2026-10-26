@@ -68,6 +68,8 @@ export interface Profile {
   can_post: boolean;
   /** True for the member who runs the board and can invite people (2.5). Missing from older servers. */
   is_owner?: boolean;
+  /** 2.7: mail to the address is known to bounce (absent on older servers). */
+  email_bounced?: boolean;
 }
 
 /** What an invitation link tells the person who opened it (POST /invitations/lookup, 2.5). */
@@ -84,7 +86,8 @@ export interface InvitationView {
   email: string | null;
   created_at: number;
   expires_at: number;
-  status: "pending" | "used" | "expired";
+  /** 2.7 adds "bounced" (the mail could not be delivered) and "taken" (the address now belongs to a member). */
+  status: "pending" | "used" | "expired" | "bounced" | "taken";
   joined_as: string | null;
 }
 
