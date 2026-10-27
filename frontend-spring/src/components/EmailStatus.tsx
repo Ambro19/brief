@@ -10,12 +10,15 @@ interface Props {
   onProfile: (profile: Profile) => void;
   /** The server no longer accepts this session (401). */
   onSessionEnded: () => void;
-  /** Re-reads the account: used when the server's answer suggests the screen is out of date. */
-  onReload: () => void;
+  /** Re-reads the account: used when the server's answer suggests the screen is out of date. Resolves to the account, or null if it couldn't be read. */
+  onReload: () => Promise<Profile | null>;
 }
 
 /** "Not now" on the request for an address lasts for this visit: until the tab or the app is closed. */
 const LATER_KEY = "brief.emailLater";
+
+/** Which of the three versions of the panel is showing. */
+type Step = "add" | "check" | "bounced";
 
 function askedForLater(accountId: number): boolean {
   try {
@@ -41,14 +44,20 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
   const [editing, setEditing] = useState(false);
   const [later, setLater] = useState(() => askedForLater(session.account_id));
   const [busy, setBusy] = useState(false);
-  /** The line under the panel: what the last action did. */
+  /**
+   * The line under the panel: what the last action did. 2.7.1: each note belongs to the step it was
+   * written for, and shows only while that step is on screen. Before, "Sent again" stayed under
+   * "We couldn't deliver your link" when the bounce report arrived after the send.
+   */
   const [note, setNote] = useState<{
     text: string;
-    tone: "good" | "bad";
+    tone: "good" | "bad" | "info";
+    step: Step;
   } | null>(null);
 
   const hasAddress = profile.email !== null;
   const bounced = hasAddress && profile.email_bounced === true;
+  const step: Step = bounced ? "bounced" : hasAddress ? "check" : "add";
   if (hasAddress && profile.email_verified) return null;
   if (!hasAddress && later) return null;
 
@@ -58,8 +67,9 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
       setNote({
         text: "The server isn't responding. Try again in a moment.",
         tone: "bad",
+        step,
       });
-    else setNote({ text: otherwise, tone: "bad" });
+    else setNote({ text: otherwise, tone: "bad", step });
   }
 
   async function saveAddress() {
@@ -68,6 +78,7 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
       setNote({
         text: "Enter an email address like name@example.com.",
         tone: "bad",
+        step,
       });
       return;
     }
@@ -77,12 +88,13 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
       onProfile(await api.setEmail(session, address));
       setEditing(false);
       setEmail("");
-      setNote({ text: "Saved. The link is on its way.", tone: "good" });
+      setNote({ text: "Saved. The link is on its way.", tone: "good", step: "check" });
     } catch (problem) {
       if (problem instanceof ApiError && problem.status === 422)
         setNote({
           text: "Mail to that address was refused less than a day ago. Check the spelling, or use another address.",
           tone: "bad",
+          step,
         });
       else failed(problem, "That address can't be used: another account has it, or it isn't a valid address.");
     } finally {
@@ -98,19 +110,46 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
       setNote({
         text: "Sent again. Only the newest link works.",
         tone: "good",
+        step: "check",
       });
     } catch (problem) {
       if (problem instanceof ApiError && problem.status === 429) {
         setNote({
           text: "A link was sent less than a minute ago. Give it a moment, then try again.",
           tone: "bad",
+          step,
         });
       } else if (problem instanceof ApiError && problem.status === 422) {
-        onReload(); // 2.7: the mail bounced in the meantime; the panel changes to say so
+        void onReload(); // 2.7: the mail bounced in the meantime; the panel changes to say so
       } else if (problem instanceof ApiError && problem.status === 400) {
-        onReload(); // nothing is waiting to be confirmed any more: the address was confirmed somewhere else
+        void onReload(); // nothing is waiting to be confirmed any more: the address was confirmed somewhere else
       } else {
         failed(problem, "That didn't work. Try again in a moment.");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * "I've opened the link" (2.7.1). The panel also checks by itself whenever this tab comes back
+   * into view, but the button must always answer: before, when the address wasn't confirmed yet,
+   * pressing it changed nothing on screen and looked broken.
+   */
+  async function checkConfirmed() {
+    setBusy(true);
+    setNote(null);
+    try {
+      const now = await onReload();
+      if (now === null) {
+        setNote({ text: "The server isn't responding. Try again in a moment.", tone: "bad", step });
+      } else if (!now.email_verified && !now.email_bounced) {
+        // Confirmed or bounced: the panel changes or closes by itself, so nothing needs saying.
+        setNote({
+          text: "Not confirmed yet. Open the link in the mail we sent, then come back to this page: it updates by itself.",
+          tone: "info",
+          step: "check",
+        });
       }
     } finally {
       setBusy(false);
@@ -207,8 +246,8 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
         </form>
       ) : (
         <p className="banner-actions">
-          <button type="button" className="btn btn-primary" onClick={onReload}>
-            I've opened it
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void checkConfirmed()}>
+            {busy ? "Checking…" : "I've opened the link"}
           </button>
           <button type="button" className="link" disabled={busy} onClick={() => void sendAgain()}>
             Send the link again
@@ -226,7 +265,7 @@ export function EmailStatus({ session, profile, onProfile, onSessionEnded, onRel
         </p>
       )}
 
-      {note && (
+      {note && note.step === step && (
         <p className="field-note" data-tone={note.tone} role="status">
           {note.text}
         </p>

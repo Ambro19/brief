@@ -306,6 +306,18 @@ textarea {
   font-weight: 600;
 }
 
+/* 2.7.1: a neutral answer, such as "not confirmed yet": neither a success nor an error. */
+.field-note[data-tone="info"] {
+  color: var(--ink);
+}
+
+/* 2.7.1: a text button inside a sentence ("Make another link"), in the accent colour so it reads as pressable. */
+.field-note .link-inline {
+  color: var(--accent);
+  font-size: inherit;
+  text-decoration: underline;
+}
+
 /* A field with a small button inside its right edge (Show / Hide). */
 .field {
   position: relative;

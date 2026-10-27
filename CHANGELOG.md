@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.7.1 - 2026-10-27
+
+**Three small fixes from the first days of 2.7 in production.** Web app only: no server code, no migration,
+no new Render variable. Nothing to set up in Resend or Render before pushing.
+
+- **"We couldn't deliver your link" no longer shows "Sent again" under it.** If a member pressed "Send the
+  link again" and Resend's bounce report arrived afterwards, the panel turned red but kept the green line
+  from the earlier send, which read as a contradiction. Each line under the panel now belongs to the step it
+  was written for (add an address / check your email / couldn't deliver) and disappears when the panel
+  changes step (`components/EmailStatus.tsx`).
+- **"I've opened it" is now "I've opened the link", and it always answers.** It asks the server whether the
+  address is confirmed. When it is, the panel closes, as before. When it isn't yet, nothing used to change on
+  screen, so the button looked broken; now it says "Not confirmed yet. Open the link in the mail we sent, then
+  come back to this page: it updates by itself." It shows "Checking…" while it asks. The page still checks
+  by itself whenever the tab comes back into view.
+- **Invite people: "Make another link".** After "Create a link", a second link needed the page opened
+  again (noted in 2.7.0 for 2.8). A "Make another link" button now sits next to "This link is shown only
+  now." Each press makes a new, separate invitation; the earlier ones keep working until used or withdrawn.
+
+Web app files: `index-BLTn_za-.js` and `index-DqdTzKJY.css` replace `index-DTDoO4CX.js` and `index-C6TIDFPY.css`.
+
 ## 2.7.0 - 2026-10-23
 
 **Mail you can trust.** On October 21 a new member typed `lovepetschoice@` for `lovepetschoices@`. Gmail

@@ -816,7 +816,7 @@ export default function App() {
                 profile={profile}
                 onProfile={setProfile}
                 onSessionEnded={() => endSession("Your session ended. Sign in again.")}
-                onReload={() => void loadProfile()}
+                onReload={loadProfile}
               />
             )}
 

@@ -207,7 +207,15 @@ export function InvitePanel({ session, refreshKey = 0, onSessionEnded }: Props) 
             Create a link
           </button>
         )}
-        {link && <p className="field-note">This link is shown only now. Make a new one whenever you need it.</p>}
+        {link && (
+          <p className="field-note">
+            This link is shown only now.{" "}
+            {/* 2.7.1: a second link no longer needs the page opened again. Each press makes a new, separate invitation. */}
+            <button type="button" className="link link-inline" disabled={busy} onClick={() => void makeLink()}>
+              {busy ? "Making…" : "Make another link"}
+            </button>
+          </p>
+        )}
       </div>
 
       <div className="card">
