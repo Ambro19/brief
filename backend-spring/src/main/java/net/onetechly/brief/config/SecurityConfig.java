@@ -5,6 +5,7 @@ import net.onetechly.brief.security.AuthMode;
 import net.onetechly.brief.security.BoardAccess;
 import net.onetechly.brief.security.JwtAuthenticationFilter;
 import net.onetechly.brief.security.JwtService;
+import net.onetechly.brief.service.Sessions;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -28,7 +29,8 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtService jwtService, AuthMode authMode,
-                                                   BoardAccess board, AccountRepository accounts) throws Exception {
+                                                   BoardAccess board, AccountRepository accounts,
+                                                   Sessions sessions) throws Exception {
         http
                 // CSRF protection defends cookie-based logins. This API has no cookies: the token
                 // travels in a header that a foreign website cannot add, so the defence is not needed.
@@ -66,7 +68,7 @@ public class SecurityConfig {
                     requests.anyRequest().permitAll();
                 })
                 // Read the token before Spring Security decides whether the caller is signed in.
-                .addFilterBefore(new JwtAuthenticationFilter(jwtService, accounts),
+                .addFilterBefore(new JwtAuthenticationFilter(jwtService, accounts, sessions),
                         UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

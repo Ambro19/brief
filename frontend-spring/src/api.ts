@@ -1,4 +1,16 @@
-import type { Account, InvitationInfo, InvitationView, Message, MessagePage, Profile, PublicAccount, ServerInfo, Session } from "./types";
+import type {
+  Account,
+  InvitationInfo,
+  InvitationView,
+  Message,
+  MessagePage,
+  Profile,
+  PublicAccount,
+  PushSubscriptionJson,
+  ServerInfo,
+  Session,
+  SignedInSession,
+} from "./types";
 
 /**
  * Thin client for the Java API.
@@ -59,11 +71,16 @@ export const api = {
    * "none" and "open", and the app then behaves exactly as 2.3 did.
    */
   async serverInfo(): Promise<ServerInfo> {
-    const body = (await jsonOrNull<{ password_policy?: string; email?: string; board?: string }>(await request("GET", "/health"))) ?? {};
+    const body =
+      (await jsonOrNull<{ password_policy?: string; email?: string; board?: string; sessions?: string; push?: string }>(
+        await request("GET", "/health"),
+      )) ?? {};
     return {
       passwordPolicy: body.password_policy === "strong" ? "strong" : "basic",
       email: body.email === "required" ? "required" : body.email === "optional" ? "optional" : "none",
       board: body.board === "closed" ? "closed" : "open",
+      sessions: body.sessions === "kept",
+      push: body.push === "on",
     };
   },
 
@@ -108,8 +125,12 @@ export const api = {
     await request("POST", `/accounts/${session.account_id}/deletion`, { password }, session.token);
   },
 
-  async login(username: string, password: string): Promise<Session> {
-    const response = await request("POST", "/login", { username, password });
+  /**
+   * Signs in. `stay` (2.8) asks for a 30-day session; it is sent only when true, and only to a
+   * server that keeps sessions, so older servers get exactly the two fields they know.
+   */
+  async login(username: string, password: string, stay = false): Promise<Session> {
+    const response = await request("POST", "/login", stay ? { username, password, stay: true } : { username, password });
     const account = (await response.json()) as Account;
     const token = response.headers.get(TOKEN_HEADER) ?? "";
     return { account_id: account.account_id, username: account.username, token };
@@ -117,6 +138,49 @@ export const api = {
 
   async logout(token: string): Promise<void> {
     await request("POST", "/logout", undefined, token);
+  },
+
+  /** Where the member is signed in, newest first (2.8). */
+  async sessions(token: string): Promise<SignedInSession[]> {
+    return (await request("GET", "/sessions", undefined, token)).json();
+  },
+
+  /** Signs one of the member's other devices out (2.8). 404 if it is not theirs or already gone. */
+  async endSession(token: string, sessionId: number): Promise<void> {
+    await request("DELETE", `/sessions/${sessionId}`, undefined, token);
+  },
+
+  /**
+   * Signs out everywhere but here (2.8). The server also retires this device's token and answers
+   * with a new one for the same session; the caller must keep using that one.
+   */
+  async signOutOthers(token: string): Promise<{ ended: number; token: string }> {
+    const response = await request("POST", "/sessions/sign-out-others", undefined, token);
+    const body = (await response.json()) as { ended: number };
+    return { ended: body.ended, token: response.headers.get(TOKEN_HEADER) ?? token };
+  },
+
+  /** The server's public key for notifications (2.8); 404 when they are off. */
+  async pushKey(): Promise<string> {
+    return ((await (await request("GET", "/push/key")).json()) as { public_key: string }).public_key;
+  },
+
+  async pushSubscribe(token: string, subscription: PushSubscriptionJson): Promise<void> {
+    await request("POST", "/push/subscription", subscription, token);
+  },
+
+  /** Whether the server has this browser's subscription for this session. */
+  async pushCheck(token: string, endpoint: string): Promise<boolean> {
+    return ((await (await request("POST", "/push/subscription/check", { endpoint }, token)).json()) as { on: boolean }).on;
+  },
+
+  async pushUnsubscribe(token: string, endpoint: string): Promise<void> {
+    await request("POST", "/push/subscription/deletion", { endpoint }, token);
+  },
+
+  /** A test notification to this device. 429 if one was sent less than a minute ago. */
+  async pushTest(token: string): Promise<number> {
+    return ((await (await request("POST", "/push/test", undefined, token)).json()) as { sent: number }).sent;
   },
 
   /** The signed-in member's own account, with the email address nobody else is shown. */

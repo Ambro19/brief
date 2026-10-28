@@ -174,6 +174,7 @@ What the deployed application reads:
 | `BRIEF_MAIL_FROM` | `render.yaml`: `Brief! <hello@briefmessage.net>` | The sender of the mails. Its domain must be verified at Resend |
 | `BRIEF_RESEND_API_KEY` | **you, in the dashboard** | The key of the mail service. Without it mails are written to the log, not sent |
 | `BRIEF_RESEND_WEBHOOK_SECRET` | **you, in the dashboard** | 2.7. The signing secret (`whsec_...`) of the Resend webhook to `/webhooks/resend`. Without it Brief! does not learn when a mail bounces |
+| `BRIEF_VAPID_PUBLIC_KEY`, `BRIEF_VAPID_PRIVATE_KEY` | **you, in the dashboard** | 2.8. The key pair for notifications, from `npx web-push generate-vapid-keys`. The private key is a secret. Without both, notifications are off |
 | `BRIEF_BOARD` | `render.yaml`: `closed` | `closed`: joining needs an invitation and reading a sign-in. `open`: anyone reads and joins |
 | `BRIEF_OWNER_USERNAME` | **you, in the dashboard** | The member who runs the board and sends invitations (on briefmessage.net: `AmbroLum`) |
 
@@ -202,6 +203,11 @@ What the deployed application reads:
 - **Since 2.7:** when a mail **bounces** (a mistyped address, a mailbox that does not exist), Resend tells
   Brief!, the member sees "We couldn't deliver your link" and is asked for the address again, and the board
   owner sees "Bounced" next to the invitation. A bounced address is not mailed again for a day.
+- **Since 2.8:** **notifications** for mentions: turn them on per device (Mentions, or Your account; it needs "Stay signed in"), and a
+  mention arrives on the phone or computer even when Brief! is closed (Web Push, encrypted so that the
+  browser maker's push service cannot read it; on iPhone and iPad from the installed app). **Stay signed
+  in** now lasts 30 days from the last use; sessions are kept in the database, so signing out is permanent;
+  **Your account** lists where you are signed in and signs any device out, or all but this one.
 - **Since 2.6:** a **Help Center** (`/help/index.html`, the **Help** link beside Privacy): what Brief! is,
   who it is for, getting started, an FAQ, pricing (free during early access) and the refund policy.
 - Posts of up to 255 characters, with the limit drawn as a ruler while you type.
@@ -212,8 +218,8 @@ What the deployed application reads:
 - The page re-reads the feed and mentions every 15 seconds.
 - API documentation (Swagger UI) at `/docs/index.html`.
 
-Limits: alerts only reach someone who has Brief! open, in a tab or as the installed app; mentions are not
-mailed, and there is no phone push yet. A confirmed email address cannot be changed yet, and an account
+Limits: notifications need the server's VAPID keys and a browser that supports Web Push (on iPhone and
+iPad, the installed app on iOS 16.4 or later); mentions are not mailed. A confirmed email address cannot be changed yet, and an account
 without a confirmed address has no way back in if its password is forgotten. Desktop notifications and installing need `localhost` or HTTPS, so on a phone they work
 once the site is deployed, not over `http://192.168...`. A username that is an ordinary word will be matched
 whenever that word is written. A bare address becomes a link only if it ends in a common ending (`.com`,
@@ -349,7 +355,7 @@ post it wrote, at once (web app: **Your account**). The board owner cannot delet
 | `DATABASE_URL` | not set | Spring only. A PostgreSQL connection string (`postgresql://user:password@host/db`), as hosts provide it. Used when `BRIEF_DB_URL` is not set |
 | `BRIEF_CLIENT_IP_HEADER` | empty | Spring only. Behind a proxy: the request header that carries the visitor's address (`CF-Connecting-IP` on Render). Empty = use the address of the connection. Leave it empty on your own machine |
 | `BRIEF_JWT_SECRET` | empty | Spring only. The key that signs login tokens, 32+ characters. Empty = a random key at each start, so members sign in again after a restart. Never put a real key in a file that is committed. |
-| `BRIEF_JWT_TTL_MINUTES` | 720 | Spring only. How long a login lasts |
+| `BRIEF_JWT_TTL_MINUTES` | 720 | Spring only. How long a login lasts without "Stay signed in" (2.8: with it, 30 days from the last use) |
 | `BRIEF_LOGIN_MAX_FAILURES` | 5 | Spring only. Attempts before a lock-out |
 | `BRIEF_LOGIN_LOCKOUT_MINUTES` | 15 | Spring only. Length of the lock-out |
 | `BRIEF_BOARD` | open | Spring only, 2.5. `open` or `closed` (strict mode only). See "A closed board" |
@@ -360,6 +366,8 @@ post it wrote, at once (web app: **Your account**). The board owner cannot delet
 | `BRIEF_RESEND_API_KEY` | empty | Spring only, 2.4. The Resend API key. Empty = mails are written to the log. Never put a real key in a file that is committed |
 | `BRIEF_RESEND_WEBHOOK_SECRET` | empty | Spring only, 2.7. The Resend webhook's signing secret (`whsec_...`). Empty = `/webhooks/resend` answers 404 and bounces are not known |
 | `BRIEF_MAIL_FROM` | empty | Spring only, 2.4. The sender, for example `Brief! <hello@briefmessage.net>`. Required when the key is set |
+| `BRIEF_VAPID_PUBLIC_KEY`, `BRIEF_VAPID_PRIVATE_KEY` | empty | Spring only, 2.8. The notification key pair (`npx web-push generate-vapid-keys`). Both empty = notifications off; one, or a pair that does not match, stops the start with a message |
+| `BRIEF_VAPID_SUBJECT` | `BRIEF_PUBLIC_URL` | Spring only, 2.8. Who push services can contact: an `https://` address or `mailto:` |
 
 Locked yourself out while testing? Restart the server (the counts are in memory), or wait.
 
@@ -401,13 +409,13 @@ update that file too, then run `npm run build`.
 | Edition | Unit | End to end | Total |
 |---|---|---|---|
 | Javalin (`backend/`) | 39 | 40 | 79 |
-| Spring Boot (`backend-spring/`) | 225 | 129 | 354 |
+| Spring Boot (`backend-spring/`) | 277 | 151 | 428 |
 
 The end-to-end tests start the real application, call it over HTTP, and check status codes and JSON.
 The 41 cases the two editions share are the same; the Spring Boot edition adds 74 for what 2.1 to 2.5
 brought (JWT, paging, the password rule, the rate limit, the mention table, usernames, the migrations and
 foreign keys, caching, the visitor's address behind a proxy, email confirmation, password reset, the closed
-board, invitations, deleting an account). The mails in these tests are never sent: the application is started without a mail service, and the
+board, invitations, deleting an account, bounces, sessions and notifications). The mails in these tests are never sent: the application is started without a mail service, and the
 tests read the links from the mailer that writes to the log. Tests use an in-memory database and never
 touch the `h2/` folders. Since 2.3 that database gets its tables from the same migration files production
 runs, so every test run also tests the migrations.

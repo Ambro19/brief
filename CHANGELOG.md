@@ -1,5 +1,127 @@
 # Changelog
 
+## 2.8.0 - 2026-10-27
+
+**Brief! reaches you.** One milestone, as agreed: a mention now reaches a member's phone or computer even
+when Brief! is closed, and "Stay signed in" finally means it, so that tapping the notification opens Brief!
+signed in. Until 2.7, every sign-in ended after 12 hours whatever the member chose, and signing out was
+remembered only in the server's memory, which a Render restart forgot.
+
+**Read "Before you deploy" below before pushing this to GitHub: one key pair to make, two Render variables.**
+
+Spring Boot edition:
+
+- **Sessions in the database** (migration `V6__sessions_and_push.sql`, `service/Sessions.java`). Every sign-in
+  is a row; the login token names it ("sid"), and `JwtAuthenticationFilter` accepts the token only while the
+  row exists and has not ended. Signing out deletes the row: permanent, after any restart.
+  - `POST /login` with `"stay": true` (the "Stay signed in on this device" box): 30 days from the last use,
+    renewed as it is used (written at most once an hour), at most a year in all. Without: 12 hours, as before.
+  - `GET /sessions`: where the member is signed in ("Chrome on Windows", "Safari on iPhone"; the label only,
+    never the full User-Agent). `DELETE /sessions/{id}`: sign one device out. `POST /sessions/sign-out-others`:
+    every device but this one, and every token from before 2.8; this device gets a new token in `x-auth-token`.
+  - A new password ("Forgot password?") and deleting the account end every session.
+  - At most 20 sessions per member (the oldest go). A session that ends by itself stops counting at once; its
+    row is deleted at the next sign-in on the board (at most hourly) or when a notification would go to it.
+  - Signing out ends the session the server accepted for the request: an old token that "Sign out everywhere
+    else" replaced cannot end the session that replaced it.
+  - Tokens issued by 2.7 keep working after the deploy, until they expire (12 hours at most), so nobody is
+    signed out by the upgrade. What only a session can do (notifications, "Sign out everywhere else") answers
+    409 for them: sign in again.
+- **Notifications for mentions** (Web Push: RFC 8030, 8291, 8292), with no new dependency: the encryption
+  (`push/WebPushCrypto.java`, ECDH P-256 + HKDF + AES-128-GCM) and the signature (`push/Vapid.java`, ES256) use
+  the JDK alone.
+  - `GET /push/key`, `POST /push/subscription`, `POST /push/subscription/check`,
+    `POST /push/subscription/deletion`, `POST /push/test` (once a minute).
+  - A post, or an edit, that **newly** mentions a member sends "<name> mentioned you" and the first 140
+    characters of the post to each of their devices, after the post is saved (`afterCommit`). Editing a typo
+    alerts nobody twice; your own name alerts nobody; at most 10 notifications per member per 10 minutes.
+  - Only a "Stay signed in" session can turn notifications on (409 otherwise), and only a session that has not
+    ended receives them; the subscription of an ended session is deleted with it. A subscription belongs to the
+    session that made it: signing that device out deletes it (on delete cascade). One the push service reports
+    gone (404/410) is deleted.
+  - A browser's subscription moves to another member only when the request carries the same auth secret, which
+    only that browser knows: knowing someone's endpoint is not enough to take their notifications over.
+  - At most 30 members notified per author per 10 minutes, so editing names in and out cannot flood the queue.
+    The notifications for a post are prepared on the push thread, after the post is saved.
+  - Endpoints are stored in one spelling (host in lower case, no `:443`).
+  - Only the push services of Google, Mozilla, Apple and Microsoft are accepted as endpoints, over https, and
+    redirects are not followed (`push/PushEndpoints.java`): the server POSTs to that URL, so anything else
+    would be a server-side request forgery. A browser key that is not a point on the P-256 curve is refused.
+  - Off unless `BRIEF_VAPID_PUBLIC_KEY` and `BRIEF_VAPID_PRIVATE_KEY` are both set. One without the other, or
+    a pair that does not match, stops the start with a message saying which.
+- `GET /health` reports `sessions` ("kept") and `push` ("on"/"off"). New start-up lines: "Push:" and "Sessions:".
+
+Web app:
+
+- **Notifications** card in Your account (on / off / test / blocked / iPhone: add to Home Screen first / sign
+  in with "Stay signed in" first), and an offer on the Mentions page. While notifications are on, the page no
+  longer shows its own desktop alert as well (known from the moment of signing in).
+- Two tabs: when "Sign out everywhere else" gives one tab a new token, the others take it over instead of
+  signing out. Signing out also drops this browser's subscription, so the next person on the device does not inherit it.
+- **Where you're signed in** card in Your account: every device, "This device", Sign out, Sign out everywhere else.
+- "Stay signed in on this device **for 30 days**".
+- Service worker (`public/sw.js`): shows the notification (a newer one replaces the older), and a tap opens
+  or focuses Brief! on Mentions. It opens only pages of this site, whatever a notification says.
+- Help: Getting started step 6 and three FAQ entries (notifications, iPhone, how long you stay signed in / a
+  lost phone). Privacy: two new rows (sign-ins, notifications) and the push services.
+
+Web app files: `index-DHGFgW9f.js` and `index-BMrsFfYN.css` replace `index-wHQMRvRV.js` and `index-DqdTzKJY.css`.
+
+### Before you deploy
+
+1. Make the key pair, on your computer (Node is already installed for the web app):
+   `npx web-push generate-vapid-keys`. It prints a Public Key and a Private Key. Keep the private key to
+   yourself, like BRIEF_JWT_SECRET: never paste it into a chat, a file or a commit.
+2. Render > brief > Environment: add `BRIEF_VAPID_PUBLIC_KEY` and `BRIEF_VAPID_PRIVATE_KEY` with those two
+   values, then Save. (Render does not add new render.yaml variables to an existing service by itself.)
+3. Push. The log must show `Migrating schema "public" to version "6 - sessions and push"`, then
+   `Push: on. ...` and `Sessions: kept in the database. ...`.
+4. Keep the pair: replacing it later makes every device turn notifications on again.
+
+Pushing without step 2 is safe: everything else works, and the log says `Push: off`.
+
+**Going back to 2.7 after 2.8 has run:** first change `BRIEF_JWT_SECRET` in Render (everyone signs in again).
+2.7 does not know sessions, and would accept every "Stay signed in" token of 2.8 until its date, a year
+ahead, including tokens that were signed out.
+
+### Independent review
+
+A separate review of the finished code, before release, found nothing critical. Fixed before release:
+
+- **High:** a device whose 12-hour sign-in had ended (a shared computer, the tab closed without signing out)
+  went on receiving the member's mentions, and could not be seen or signed out in "Where you're signed in".
+  Now only live sessions receive notifications, the ended one is deleted when found, and notifications need
+  "Stay signed in" (which also means a tap opens Brief! signed in).
+- **Medium:** "Sign out everywhere else" signed this device's other tabs out, and with them its notifications;
+  an old token could end the renewed session. Rolling back to 2.7 would revive signed-out tokens (note above).
+  A member who learned another's endpoint could take their notifications over.
+- **Low:** the page could alert as well as the notification until Mentions was opened; work after the commit
+  could be lost; a notification link could point to another site; an author could fill the queue by editing
+  names in and out; endpoints in two spellings; the FAQ did not name the one-year limit.
+
+Checked and fine, among others: the encryption and the VAPID signature against the RFCs, every authorization
+path of the new endpoints, the endpoint check against server-side request forgery (user info, trailing dots,
+IDN and IPv6 hosts, redirects), transactions and bean wiring under real Spring, the entity types against V6.
+
+### Verification
+
+- 428 tests (277 unit, 151 end to end), all passing on H2 and on PostgreSQL 16. New: `SessionsTest`,
+  `SessionsAndPushTest` (a stand-in push service inside the test receives what Brief! sends, and the test
+  decrypts it as the browser would), `WebPushCryptoTest`, `VapidTest`, `PushEndpointsTest`,
+  `PushNotificationsTest`, `DeviceLabelTest`, and new cases in the filter, token, mention and message tests.
+- The encryption produces byte for byte what Mozilla's reference implementation (`http_ece` 1.2.0) produces
+  from the same keys and salt (three vectors, in `WebPushCryptoTest`), and `http_ece` decrypts what it produces.
+- Deliberate bugs: 42, each breaking one rule of 2.8 (a session not checked, an endpoint allowed too widely,
+  a wrong byte in the encryption, a notification sent before the post is saved, ...). The tests caught 41; the
+  42nd (marking a session as used on every request instead of once an hour) changes nothing a test can see,
+  because the database statement keeps its own once-an-hour condition.
+- Browser checks, 27: a stand-in push service verified every VAPID signature and decrypted every notification
+  with `http_ece`; the service worker showed the notification; sessions listed, signed out one by one and
+  everywhere else; a second tab of the same browser stays signed in; without "Stay signed in" the card explains
+  instead of offering; turned off and signed out, nothing more is sent; the iPhone-in-a-tab explanation; phone width.
+  The 2.7.1 and 2.7.0 browser checks pass again.
+- Migration from a database made by 2.3.0 straight to version 6, on PostgreSQL.
+
 ## 2.7.1 - 2026-10-27
 
 **Three small fixes from the first days of 2.7 in production.** Web app only: no server code, no migration,

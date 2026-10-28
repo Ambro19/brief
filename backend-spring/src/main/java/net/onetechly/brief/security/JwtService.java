@@ -50,6 +50,12 @@ import java.util.function.LongSupplier;
  * equal. A new password adds one to the number in the row. That survives a restart, which the
  * answer to a forgotten password must.
  *
+ * Since 2.8 a token issued at sign-in also names its session ("sid"): a row in account_session
+ * (service/Sessions). JwtAuthenticationFilter accepts such a token only while that row exists
+ * and has not expired, so signing out deletes the row and the token is refused from then on,
+ * after a restart too. The in-memory list above remains only for tokens issued by 2.7 and
+ * earlier, which carry no "sid"; they all expire within 12 hours of the upgrade.
+ *
  * The signing uses only the JDK (javax.crypto), so every step is visible in this file. A
  * library such as jjwt or Spring's oauth2-resource-server does the same job and is the usual
  * choice in a larger system.
@@ -125,6 +131,17 @@ public class JwtService {
      * Account.tokenVersion). The number travels in the claim "ver".
      */
     public String issue(int accountId, int tokenVersion) {
+        return issue(accountId, tokenVersion, null, clockSeconds.getAsLong() + ttlSeconds);
+    }
+
+    /**
+     * A token for one session (2.8): it names the session ("sid"), and expires at the given
+     * second. The session row decides whether it is still good; the expiry here is only the
+     * latest moment, after which the token is refused whatever the row says.
+     *
+     * @param sessionId the account_session row, or null for a token without a session (as before 2.8)
+     */
+    public String issue(int accountId, int tokenVersion, Integer sessionId, long expiresAt) {
         long now = clockSeconds.getAsLong();
         byte[] id = new byte[16];
         random.nextBytes(id);
@@ -133,8 +150,11 @@ public class JwtService {
         claims.put("sub", String.valueOf(accountId));       // subject: who the token is for
         claims.put("jti", ENCODER.encodeToString(id));       // token id: lets one token be revoked
         claims.put("iat", now);                              // issued at
-        claims.put("exp", now + ttlSeconds);                 // expires at
+        claims.put("exp", expiresAt);                        // expires at
         claims.put("ver", tokenVersion);                     // the account's token generation when this was issued
+        if (sessionId != null) {
+            claims.put("sid", sessionId);                    // 2.8: the session this token belongs to
+        }
         String payload;
         try {
             payload = ENCODER.encodeToString(mapper.writeValueAsBytes(claims));
@@ -145,8 +165,12 @@ public class JwtService {
         return signedPart + "." + ENCODER.encodeToString(sign(signedPart));
     }
 
-    /** What a valid token says: whose it is, and under which token generation of the account it was issued. */
-    public record TokenInfo(int accountId, int tokenVersion) {
+    /**
+     * What a valid token says: whose it is, under which token generation of the account it was
+     * issued, and (2.8) which session it belongs to; sessionId is null for a token issued by 2.7
+     * or earlier.
+     */
+    public record TokenInfo(int accountId, int tokenVersion, Integer sessionId) {
     }
 
     /**
@@ -171,13 +195,18 @@ public class JwtService {
         try {
             // A token without "ver" was issued by 2.3 or earlier and counts as generation 0. Such a
             // token keeps working after the upgrade, until the account's password is replaced.
-            return new TokenInfo(Integer.parseInt(claims.path("sub").asText()), claims.path("ver").asInt(0));
+            Integer sessionId = claims.path("sid").canConvertToInt() ? claims.path("sid").asInt() : null;
+            return new TokenInfo(Integer.parseInt(claims.path("sub").asText()), claims.path("ver").asInt(0), sessionId);
         } catch (NumberFormatException e) {
             return null;
         }
     }
 
-    /** Ends a token early (sign-out). Unknown, invalid or already revoked tokens are ignored (idempotent). */
+    /**
+     * Ends a token early (sign-out) by remembering its id in memory. Since 2.8 only for tokens
+     * without a session: a token with one is ended by deleting its session (service/Sessions).
+     * Unknown, invalid or already revoked tokens are ignored (idempotent).
+     */
     public void revoke(String token) {
         JsonNode claims = verifiedClaims(token);
         if (claims == null) {

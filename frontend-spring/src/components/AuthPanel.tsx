@@ -30,6 +30,8 @@ const PLAIN_SERVER: ServerInfo = {
   passwordPolicy: "basic",
   email: "none",
   board: "open",
+  sessions: false,
+  push: false,
 };
 
 /** Says what is wrong with a new password, or null if it meets the server's rule. Mirrors PasswordPolicy.java. */
@@ -227,7 +229,7 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
         await api.register(name, password, asksEmail ? address : undefined, invitation?.secret);
         accountCreated = true;
       }
-      const session = await api.login(name, password);
+      const session = await api.login(name, password, stay && info.sessions); // 2.8: a 30-day session
       saveStayChoice(stay);
       onSignedIn(session, registering, stay);
     } catch (problem) {
@@ -512,7 +514,11 @@ export function AuthPanel({ onSignedIn, takenUsernames, server, resetSecret, onR
           {(mode === "signin" || registering) && (
             <label className="check" htmlFor="auth-stay">
               <input id="auth-stay" type="checkbox" checked={stay} onChange={(event) => setStay(event.target.checked)} />
-              <span>Stay signed in on this device</span>
+              <span>
+                Stay signed in on this device
+                {/* 2.8: the server keeps the session for 30 days from the last use. */}
+                {info.sessions && <span className="check-note"> for 30 days</span>}
+              </span>
             </label>
           )}
 

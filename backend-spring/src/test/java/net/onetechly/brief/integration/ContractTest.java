@@ -33,6 +33,8 @@ import static org.junit.jupiter.api.Assertions.*;
                 "brief.board=open",
                 "brief.owner-username=",
                 "brief.mail.resend-api-key=",
+                "brief.push.vapid-public-key=",   // 2.8: notifications off, whatever the machine has set
+                "brief.push.vapid-private-key=",
                 "spring.datasource.url=${BRIEF_TEST_DB_URL:jdbc:h2:mem:brief-contract;DB_CLOSE_DELAY=-1}",
                 "spring.datasource.username=${BRIEF_TEST_DB_USER:sa}",
                 "spring.datasource.password=${BRIEF_TEST_DB_PASSWORD:sa}"})

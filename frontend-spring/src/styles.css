@@ -1168,6 +1168,52 @@ textarea {
   color: var(--danger);
 }
 
+/* 2.8: "Where you're signed in": one row per device, laid out like the list of invitations. */
+.sessions {
+  display: grid;
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
+}
+
+.sessions li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 14px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.session-device {
+  flex: 1 1 200px;
+  font-weight: 600;
+}
+
+.session-here {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.session-when {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.sessions .link {
+  color: var(--danger);
+}
+
+/* 2.8: the small addition after "Stay signed in on this device". */
+.check-note {
+  color: var(--muted);
+}
+
 .facts {
   display: grid;
   grid-template-columns: max-content 1fr;

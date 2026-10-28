@@ -152,8 +152,20 @@ Read-time search versus write-time index:
 | A check and a write in one statement | `AccountTokenRepository.claim`, `InvitationRepository.claim` | `update ... where used_at is null`: the database decides who was first, not the application |
 | A new status code | `exception/UndeliverableAddressException.java` (422) | "This address cannot receive mail" is a different answer from "this address is taken" (400), so the web app can say the right thing |
 
+## Added in 2.8 (Spring Boot edition only)
+
+| Feature | Where | The idea |
+|---|---|---|
+| Sessions in the database | `service/Sessions.java`, V6 | A stateless token that names a row: the signature says who, the row says whether it still counts. Signing out deletes the row, so it survives a restart |
+| A sliding expiry, written sparingly | `AccountSessionRepository.touch` | "30 days from the last use" costs one conditional UPDATE an hour, not one per request |
+| Web Push encryption | `push/WebPushCrypto.java` | ECDH, HKDF and AES-128-GCM (RFC 8291, 8188) with the JDK alone, checked byte for byte against Mozilla's reference implementation |
+| Signing as the sender | `push/Vapid.java` | An ES256 JWT (RFC 8292) proves the notification comes from this server's key |
+| Refusing a URL from the client | `push/PushEndpoints.java` | The server will POST to the subscription's endpoint, so only the browser makers' push services are accepted: no server-side request forgery |
+| Work after the commit | `PushNotifications.mentioned` | `TransactionSynchronization.afterCommit`: a post that fails to save alerts nobody |
+| Cascades that follow the user's intent | V6 foreign keys | Deleting a session deletes its push subscription: a device that was signed out receives nothing |
+
 ## What the Spring edition does not have yet
 
 - springdoc-openapi to generate the API description from the code
 - A shared store (Redis) for the rate-limit counts and revoked tokens, needed with more than one server
-- Refresh tokens: today a login lasts 12 hours and then the member signs in again
+- Refresh tokens: since 2.8 a session row does their job (30 days from the last use, ended by deleting it); a short-lived token beside a long-lived refresh token would spare the database look-up on every request

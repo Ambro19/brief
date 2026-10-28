@@ -29,6 +29,8 @@ import static org.junit.jupiter.api.Assertions.*;
                 "brief.owner-username=TestUser1",
                 "brief.invite-code=",
                 "brief.mail.resend-api-key=",
+                "brief.push.vapid-public-key=",   // 2.8: notifications off, whatever the machine has set
+                "brief.push.vapid-private-key=",
                 "brief.mail.from=Brief! <hello@briefmessage.net>",
                 "brief.mail.resend-webhook-secret=" + EmailBounceTest.SECRET,
                 "spring.datasource.url=${BRIEF_TEST_DB_URL:jdbc:h2:mem:brief-bounce;DB_CLOSE_DELAY=-1}",

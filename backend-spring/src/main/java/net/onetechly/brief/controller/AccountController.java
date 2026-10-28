@@ -8,6 +8,7 @@ import net.onetechly.brief.dto.Credentials;
 import net.onetechly.brief.dto.PublicAccount;
 import net.onetechly.brief.dto.Registration;
 import net.onetechly.brief.entity.Account;
+import net.onetechly.brief.entity.AccountSession;
 import net.onetechly.brief.entity.Message;
 import net.onetechly.brief.exception.ForbiddenException;
 import net.onetechly.brief.security.AuthGuard;
@@ -20,6 +21,7 @@ import net.onetechly.brief.service.AccountService;
 import net.onetechly.brief.service.InvitationService;
 import net.onetechly.brief.service.MentionService;
 import net.onetechly.brief.service.MessageService;
+import net.onetechly.brief.service.Sessions;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -54,12 +56,13 @@ public class AccountController {
     private final InvitationService invitationService;
     private final AccountDeletionService deletionService;
     private final AuthGuard authGuard;
+    private final Sessions sessions;
 
     public AccountController(AccountService accountService, MessageService messageService,
                              MentionService mentionService, JwtService jwtService,
                              LoginRateLimiter loginRateLimiter, ClientAddress clientAddress, BoardAccess board,
                              InvitationService invitationService, AccountDeletionService deletionService,
-                             AuthGuard authGuard) {
+                             AuthGuard authGuard, Sessions sessions) {
         this.accountService = accountService;
         this.messageService = messageService;
         this.mentionService = mentionService;
@@ -70,6 +73,7 @@ public class AccountController {
         this.invitationService = invitationService;
         this.deletionService = deletionService;
         this.authGuard = authGuard;
+        this.sessions = sessions;
     }
 
     /**
@@ -118,6 +122,9 @@ public class AccountController {
     /**
      * POST /login - 200 with the account and a token (a JWT) in the X-Auth-Token header,
      * 401 if the credentials do not match, 429 after too many failed attempts.
+     *
+     * 2.8: each sign-in starts a session (service/Sessions), and the token names it. With
+     * "stay": true in the body the session lasts 30 days from its last use; without, 12 hours.
      */
     @PostMapping("/login")
     public ResponseEntity<AccountResponse> login(@RequestBody Credentials credentials, HttpServletRequest request) {
@@ -126,17 +133,33 @@ public class AccountController {
         loginRateLimiter.acquire(attemptKey);                           // counts this attempt; throws (429) while locked out
         Account account = accountService.authenticate(credentials);    // throws (401) on a mismatch: the attempt stays counted
         loginRateLimiter.recordSuccess(attemptKey);                     // right password: clear the count
+        AccountSession session = sessions.open(account.getAccountId(), credentials.staysSignedIn(),
+                request.getHeader("User-Agent"));
         return ResponseEntity.ok()
                 // The token carries the account's token generation; a later password reset makes it worthless.
-                .header(TOKEN_HEADER, jwtService.issue(account.getAccountId(), account.getTokenVersion()))
+                // Since 2.8 it also names its session, which signing out deletes.
+                .header(TOKEN_HEADER, jwtService.issue(account.getAccountId(), account.getTokenVersion(),
+                        session.getSessionId(), sessions.tokenExpiry(session)))
                 .body(new AccountResponse(account.getAccountId(), account.getUsername(), credentials.password()));
     }
 
-    /** POST /logout - always 200. Ending a session that is already gone is not an error. */
+    /**
+     * POST /logout - always 200. Ending a session that is already gone is not an error.
+     *
+     * 2.8: a token with a session ends it for good (the row is deleted, and with it this device's
+     * push subscription). A token from 2.7 or earlier is remembered in memory, as before.
+     */
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(
             @RequestHeader(value = "Authorization", required = false) String authorization) {
-        jwtService.revoke(JwtService.extractBearerToken(authorization));
+        // The session the filter accepted for this request: a token that no longer holds (replaced by
+        // "Sign out everywhere else", say) must not end the session that replaced it (independent review of 2.8.0).
+        Integer sessionId = authGuard.currentSessionId();
+        if (sessionId != null) {
+            sessions.end(sessionId);
+        } else {
+            jwtService.revoke(JwtService.extractBearerToken(authorization));
+        }
         return ResponseEntity.ok().build();
     }
 

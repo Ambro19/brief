@@ -80,6 +80,8 @@ public abstract class ApiTestBase {
     protected void resetDatabase() {
         loginRateLimiter.reset();
         mailbox().clear();
+        jdbc.execute("delete from push_subscription"); // 2.8
+        jdbc.execute("delete from account_session");   // 2.8
         jdbc.execute("delete from account_token");
         jdbc.execute("delete from email_bounce");
         jdbc.execute("delete from invitation");
@@ -93,6 +95,8 @@ public abstract class ApiTestBase {
         jdbc.execute("alter table account_token alter column token_id restart with 1");
         jdbc.execute("alter table invitation alter column invitation_id restart with 1");
         jdbc.execute("alter table email_bounce alter column bounce_id restart with 1");
+        jdbc.execute("alter table account_session alter column session_id restart with 1");
+        jdbc.execute("alter table push_subscription alter column subscription_id restart with 1");
         // The seed password is plain text on purpose: it exercises the "upgrade to a hash on first login" path.
         // username_key is the lower-case form the application compares names by (Account.keyOf).
         // The row has no email address: it stands for an account from before 2.4.

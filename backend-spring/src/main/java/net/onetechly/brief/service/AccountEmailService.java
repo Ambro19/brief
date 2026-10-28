@@ -54,19 +54,21 @@ public class AccountEmailService {
     private final AuthMode mode;
     private final BoardOwner owner;
     private final EmailBounces bounces;
+    private final Sessions sessions;
     private final LongSupplier clockSeconds;
 
     /** The constructor Spring uses. */
     @Autowired
     public AccountEmailService(AccountRepository accounts, AccountTokens tokens, AccountMails mails,
-                               PasswordPolicy passwordPolicy, AuthMode mode, BoardOwner owner, EmailBounces bounces) {
-        this(accounts, tokens, mails, passwordPolicy, mode, owner, bounces, () -> System.currentTimeMillis() / 1000);
+                               PasswordPolicy passwordPolicy, AuthMode mode, BoardOwner owner, EmailBounces bounces,
+                               Sessions sessions) {
+        this(accounts, tokens, mails, passwordPolicy, mode, owner, bounces, sessions, () -> System.currentTimeMillis() / 1000);
     }
 
     /** The clock is injectable so tests can move time forward without sleeping. */
     public AccountEmailService(AccountRepository accounts, AccountTokens tokens, AccountMails mails,
                                PasswordPolicy passwordPolicy, AuthMode mode, BoardOwner owner,
-                               EmailBounces bounces, LongSupplier clockSeconds) {
+                               EmailBounces bounces, Sessions sessions, LongSupplier clockSeconds) {
         this.accounts = accounts;
         this.tokens = tokens;
         this.mails = mails;
@@ -74,6 +76,7 @@ public class AccountEmailService {
         this.mode = mode;
         this.owner = owner;
         this.bounces = bounces;
+        this.sessions = sessions;
         this.clockSeconds = clockSeconds;
     }
 
@@ -230,5 +233,6 @@ public class AccountEmailService {
         // Every login token issued so far is refused from now on (see JwtAuthenticationFilter).
         account.endAllSessions();
         accounts.save(account);
+        sessions.endAll(account.getAccountId()); // 2.8: and every session goes, with its push subscription
     }
 }

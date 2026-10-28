@@ -3,6 +3,7 @@ package net.onetechly.brief.controller;
 import net.onetechly.brief.security.BoardAccess;
 import net.onetechly.brief.security.EmailPolicy;
 import net.onetechly.brief.security.PasswordPolicy;
+import net.onetechly.brief.service.PushNotifications;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -17,6 +18,9 @@ import java.util.Map;
  *   email            "required" or "optional": whether creating an account asks for an address (2.4)
  *   board            "open" or "closed": whether an invitation code is asked for, and whether
  *                    posts can be read without signing in (2.4)
+ *   sessions         "kept" (2.8): sessions live in the database; "Stay signed in" lasts 30 days,
+ *                    and Your account lists them (GET /sessions)
+ *   push             "on" or "off" (2.8): whether members can turn on notifications
  *
  * A server from before 2.4, and the Javalin edition, send neither of the last two. The web
  * app then shows the forms it always had.
@@ -27,11 +31,14 @@ public class HealthController {
     private final PasswordPolicy passwordPolicy;
     private final EmailPolicy emailPolicy;
     private final BoardAccess board;
+    private final PushNotifications push;
 
-    public HealthController(PasswordPolicy passwordPolicy, EmailPolicy emailPolicy, BoardAccess board) {
+    public HealthController(PasswordPolicy passwordPolicy, EmailPolicy emailPolicy, BoardAccess board,
+                            PushNotifications push) {
         this.passwordPolicy = passwordPolicy;
         this.emailPolicy = emailPolicy;
         this.board = board;
+        this.push = push;
     }
 
     @GetMapping("/health")
@@ -41,6 +48,8 @@ public class HealthController {
         body.put("password_policy", passwordPolicy.name());
         body.put("email", emailPolicy.name());
         body.put("board", board.name());
+        body.put("sessions", "kept");
+        body.put("push", push.isOn() ? "on" : "off");
         return body;
     }
 }

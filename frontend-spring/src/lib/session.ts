@@ -9,8 +9,9 @@ const STAY_KEY = "brief.staySignedIn";
  *   sessionStorage (the default): survives a page reload, ends when the tab closes.
  *   localStorage ("Stay signed in"): survives closing the tab or the installed app.
  *
- * Either way the server decides how long the login token itself is valid (12 hours unless
- * configured otherwise). After that, the first attempt to post asks you to sign in again.
+ * Either way the server decides how long the session lasts. Since 2.8, with "Stay signed in" the
+ * server keeps it for 30 days from the last use (it used to end after 12 hours whatever was
+ * chosen); without, 12 hours. After that, the next request asks you to sign in again.
  *
  * Storage can be unavailable (private windows, blocked site data), so every access is guarded
  * and the app still works without it.
@@ -40,6 +41,33 @@ export function saveSession(session: Session | null, stay = false): void {
     window.sessionStorage.removeItem(KEY);
     window.localStorage.removeItem(KEY);
     if (session) (stay ? window.localStorage : window.sessionStorage).setItem(KEY, JSON.stringify(session));
+  } catch {
+    /* the app keeps the session in memory regardless */
+  }
+}
+
+/** True when the session on this device was kept with "Stay signed in" (in localStorage, 2.8: notifications need it). */
+export function isStayingSignedIn(): boolean {
+  try {
+    return read(window.localStorage) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** The key the session is stored under, for code that listens to changes made in other tabs. */
+export const SESSION_KEY = KEY;
+
+/**
+ * Replaces the token of the stored session, wherever it is kept (2.8: "Sign out everywhere else"
+ * gives this device a new token for the same session).
+ */
+export function replaceStoredToken(token: string): void {
+  try {
+    for (const storage of [window.sessionStorage, window.localStorage]) {
+      const stored = read(storage);
+      if (stored) storage.setItem(KEY, JSON.stringify({ ...stored, token }));
+    }
   } catch {
     /* the app keeps the session in memory regardless */
   }

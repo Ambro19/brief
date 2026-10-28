@@ -37,6 +37,8 @@ import static org.junit.jupiter.api.Assertions.*;
                 "brief.board=open",
                 "brief.owner-username=",
                 "brief.mail.resend-api-key=",
+                "brief.push.vapid-public-key=",   // 2.8: notifications off, whatever the machine has set
+                "brief.push.vapid-private-key=",
                 "brief.client-ip.header=" + StrictAuthTest.PROXY_HEADER,
                 "spring.datasource.url=${BRIEF_TEST_DB_URL:jdbc:h2:mem:brief-strict;DB_CLOSE_DELAY=-1}",
                 "spring.datasource.username=${BRIEF_TEST_DB_USER:sa}",
@@ -304,6 +306,19 @@ class StrictAuthTest extends ApiTestBase {
     }
 
     // ---- email on accounts (2.4) ----
+
+    @Test
+    void withoutVapidKeysNotificationsAreOffAndSayNotFound() throws Exception {
+        // 2.8: a server without BRIEF_VAPID_PUBLIC_KEY and BRIEF_VAPID_PRIVATE_KEY works as 2.7 did.
+        assertEquals("off", mapper.readTree(get("/health").body()).get("push").asText());
+        assertEquals(404, get("/push/key").statusCode());
+        String token = registerSecondUser();
+        assertEquals(404, send("POST", "/push/subscription", "{\"endpoint\":\"https://fcm.googleapis.com/fcm/send/x\","
+                + "\"keys\":{\"p256dh\":\"BAAA\",\"auth\":\"AAAA\"}}", token).statusCode());
+        assertEquals(404, send("POST", "/push/test", null, token).statusCode());
+        assertFalse(mapper.readTree(send("POST", "/push/subscription/check", "{\"endpoint\":\"https://fcm.googleapis.com/fcm/send/x\"}",
+                token).body()).get("on").asBoolean());
+    }
 
     @Test
     void healthTellsTheWebAppThatAnEmailIsRequiredAndTheBoardIsOpen() throws Exception {

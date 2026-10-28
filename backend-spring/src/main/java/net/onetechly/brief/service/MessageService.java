@@ -33,11 +33,14 @@ public class MessageService {
     private final MessageRepository messages;
     private final AccountRepository accounts;
     private final MentionService mentionService;
+    private final MentionAlerts alerts;
 
-    public MessageService(MessageRepository messages, AccountRepository accounts, MentionService mentionService) {
+    public MessageService(MessageRepository messages, AccountRepository accounts, MentionService mentionService,
+                          MentionAlerts alerts) {
         this.messages = messages;
         this.accounts = accounts;
         this.mentionService = mentionService;
+        this.alerts = alerts;
     }
 
     @Transactional
@@ -50,7 +53,8 @@ public class MessageService {
             time = System.currentTimeMillis() / 1000; // the client sent no time: use now, in epoch seconds
         }
         Message saved = messages.save(new Message(request.postedBy(), request.messageText(), time));
-        mentionService.index(saved); // record who this message mentions, in the same transaction
+        // Record who this message mentions, in the same transaction, and alert them (2.8: once it is saved).
+        alerts.mentioned(saved, mentionService.index(saved));
         return saved;
     }
 
@@ -83,7 +87,8 @@ public class MessageService {
         Message message = messages.findById(messageId).orElseThrow(BadRequestException::new);
         message.setMessageText(newText);
         Message saved = messages.save(message);
-        mentionService.index(saved); // the new text may mention different people
+        // The new text may mention different people; only those it did not mention before are alerted.
+        alerts.mentioned(saved, mentionService.index(saved));
         return saved;
     }
 

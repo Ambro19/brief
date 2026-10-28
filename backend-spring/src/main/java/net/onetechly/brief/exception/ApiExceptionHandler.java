@@ -65,6 +65,12 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).build();
     }
 
+    /** 2.8: a token from before sessions asked for something only a session can have. Sign in again. */
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<Void> needsSession(ConflictException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).build();
+    }
+
     /**
      * 2.7: the request would mail an address that bounced recently. 422 Unprocessable Entity:
      * the request is well formed, but this address cannot be used. Distinct from 400 so that the

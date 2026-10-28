@@ -2,6 +2,8 @@ package net.onetechly.brief.unit;
 
 import net.onetechly.brief.repository.EmailBounceRepository;
 import net.onetechly.brief.service.EmailBounces;
+import net.onetechly.brief.repository.AccountSessionRepository;
+import net.onetechly.brief.service.Sessions;
 import net.onetechly.brief.dto.Profile;
 import net.onetechly.brief.entity.Account;
 import net.onetechly.brief.entity.AccountToken;
@@ -40,6 +42,7 @@ import static org.mockito.Mockito.when;
  */
 class AccountEmailServiceTest {
     private final EmailBounceRepository bounceTable = mock(EmailBounceRepository.class);
+    private final AccountSessionRepository sessionTable = mock(AccountSessionRepository.class);
 
 
     private static final String ADDRESS = "ada@example.test";
@@ -61,7 +64,8 @@ class AccountEmailServiceTest {
     private AccountEmailService serviceFor(String mode) {
         AuthMode authMode = new AuthMode(mode);
         return new AccountEmailService(accounts, new AccountTokens(table.repository, now::get),
-                new AccountMails(mailbox, "https://brief.example"), new PasswordPolicy(authMode), authMode, new BoardOwner("Cy"), new EmailBounces(bounceTable, now::get), now::get);
+                new AccountMails(mailbox, "https://brief.example"), new PasswordPolicy(authMode), authMode, new BoardOwner("Cy"), new EmailBounces(bounceTable, now::get),
+                new Sessions(sessionTable, accounts, 12 * 60 * 60, now::get), now::get); // 2.8: a new password ends every session
     }
 
     /** An account the mocked table knows, by id and (if it has one) by address. */

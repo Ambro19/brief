@@ -6,7 +6,12 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
- * The JSON body of POST /register and POST /login.
+ * The JSON body of POST /login (and, until 2.4, of POST /register).
+ *
+ * {@code stay} (2.8, optional): the "Stay signed in on this device" box. true makes a session that
+ * lasts 30 days from its last use; false or absent, one that lasts 12 hours, as before 2.8. A
+ * client that does not know the field, the original training contract included, simply leaves
+ * it out.
  *
  * The constraints are checked only where the controller asks for it with @Valid - that is,
  * on registration. Login deliberately does not validate: a wrong or missing value there is
@@ -17,5 +22,16 @@ import jakarta.validation.constraints.Size;
  */
 public record Credentials(
         @NotBlank @Size(max = 255) @Pattern(regexp = MessageRequest.NO_NUL) String username,
-        @NotNull @Size(min = 4, max = 1000) String password) {
+        @NotNull @Size(min = 4, max = 1000) String password,
+        Boolean stay) {
+
+    /** Credentials without the "stay" choice: a 12-hour session. */
+    public Credentials(String username, String password) {
+        this(username, password, null);
+    }
+
+    /** True only when the client asked for a long session. */
+    public boolean staysSignedIn() {
+        return Boolean.TRUE.equals(stay);
+    }
 }

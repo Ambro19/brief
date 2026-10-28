@@ -9,9 +9,12 @@
 #
 # Field names follow https://render.com/docs/blueprint-spec (checked October 11, 2026).
 #
-# Three variables are not filled in by this file: BRIEF_RESEND_API_KEY and BRIEF_RESEND_WEBHOOK_SECRET,
-# secrets, and BRIEF_OWNER_USERNAME, which differs from one deployment to the next ("sync: false").
-# The start-up log says what the application found: the lines "Board:", "Owner:", "Mail:" and "Bounces:".
+# Five variables are not filled in by this file: BRIEF_RESEND_API_KEY, BRIEF_RESEND_WEBHOOK_SECRET and
+# BRIEF_VAPID_PRIVATE_KEY, secrets; BRIEF_VAPID_PUBLIC_KEY, which belongs with that private key; and
+# BRIEF_OWNER_USERNAME, which differs from one deployment to the next ("sync: false").
+# Render does not add a new variable of this file to a service that already exists: add it by hand
+# under the service's Environment. The start-up log says what the application found: the lines
+# "Board:", "Owner:", "Mail:", "Bounces:", "Push:" and "Sessions:".
 
 services:
   - type: web
@@ -54,6 +57,14 @@ services:
       # bounced (events email.bounced and email.suppressed), made in Resend > Webhooks for https://briefmessage.net/webhooks/resend. A secret.
       # Without it Brief! does not learn of bounces, and the log says so.
       - key: BRIEF_RESEND_WEBHOOK_SECRET
+        sync: false
+      # 2.8: the key pair that lets members turn on notifications for mentions (Web Push, VAPID).
+      # Make one with "npx web-push generate-vapid-keys" and copy both lines of its output. The private
+      # key is a secret. Without both, notifications are off and the log says so; with one, or a pair
+      # that does not match, the application refuses to start and says why.
+      - key: BRIEF_VAPID_PUBLIC_KEY
+        sync: false
+      - key: BRIEF_VAPID_PRIVATE_KEY
         sync: false
       # Closed: creating an account needs an invitation link, and reading needs a sign-in (2.5).
       # "open" lets anyone read and join.

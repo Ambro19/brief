@@ -4,6 +4,7 @@ import net.onetechly.brief.mail.AccountMails;
 import net.onetechly.brief.mail.LogMailer;
 import net.onetechly.brief.mail.Mailer;
 import net.onetechly.brief.mail.ResendWebhookVerifier;
+import net.onetechly.brief.push.Vapid;
 import net.onetechly.brief.repository.AccountRepository;
 import net.onetechly.brief.security.BoardAccess;
 import net.onetechly.brief.security.BoardOwner;
@@ -40,10 +41,11 @@ public class StartupReport implements ApplicationRunner {
     private final BoardOwner owner;
     private final AccountRepository accounts;
     private final ResendWebhookVerifier webhook;
+    private final Vapid vapid;
 
     public StartupReport(@Value("${spring.datasource.url}") String datasourceUrl,
                          BoardAccess board, Mailer mailer, AccountMails mails, BoardOwner owner,
-                         AccountRepository accounts, ResendWebhookVerifier webhook) {
+                         AccountRepository accounts, ResendWebhookVerifier webhook, Vapid vapid) {
         this.datasourceUrl = datasourceUrl;
         this.board = board;
         this.mailer = mailer;
@@ -51,6 +53,7 @@ public class StartupReport implements ApplicationRunner {
         this.owner = owner;
         this.accounts = accounts;
         this.webhook = webhook;
+        this.vapid = vapid;
     }
 
     @Override
@@ -78,6 +81,21 @@ public class StartupReport implements ApplicationRunner {
             log.info(mailLine);
         }
         reportBounces(mailer instanceof LogMailer);
+        reportPush(onRender);
+        log.info("Sessions: kept in the database. \"Stay signed in\" lasts 30 days from the last use; otherwise 12 hours.");
+    }
+
+    /** The notification line (2.8). */
+    private void reportPush(boolean onRender) {
+        if (vapid.isConfigured()) {
+            log.info("Push: on. Members who turn on notifications are told about mentions on their devices "
+                    + "(VAPID public key {}...).", vapid.publicKey().substring(0, 12));
+        } else if (onRender) {
+            log.warn("Push: off. Set BRIEF_VAPID_PUBLIC_KEY and BRIEF_VAPID_PRIVATE_KEY (npx web-push generate-vapid-keys) "
+                    + "so that members can turn on notifications.");
+        } else {
+            log.info("Push: off (BRIEF_VAPID_PUBLIC_KEY and BRIEF_VAPID_PRIVATE_KEY are not set).");
+        }
     }
 
     /**

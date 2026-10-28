@@ -136,8 +136,8 @@ class JwtServiceTest {
 
     @Test
     void readTellsWhoseTheTokenIsAndUnderWhichGenerationItWasIssued() {
-        assertEquals(new JwtService.TokenInfo(7, 0), jwt.read(jwt.issue(7)));
-        assertEquals(new JwtService.TokenInfo(7, 3), jwt.read(jwt.issue(7, 3)));
+        assertEquals(new JwtService.TokenInfo(7, 0, null), jwt.read(jwt.issue(7)));
+        assertEquals(new JwtService.TokenInfo(7, 3, null), jwt.read(jwt.issue(7, 3)));
         assertEquals(Integer.valueOf(7), jwt.resolve(jwt.issue(7, 3)));
     }
 
@@ -152,5 +152,23 @@ class JwtServiceTest {
         String old = jwt.issue(7);
         now.addAndGet(600);
         assertNull(jwt.read(old), "expired");
+    }
+
+    // ---- the session (2.8) ----
+
+    @Test
+    void aTokenForASessionNamesItAndExpiresWhenItIsTold() {
+        String token = jwt.issue(7, 2, 41, now.get() + 30L * 24 * 60 * 60);
+        assertEquals(new JwtService.TokenInfo(7, 2, 41), jwt.read(token));
+
+        now.addAndGet(29L * 24 * 60 * 60);
+        assertNotNull(jwt.read(token), "a long session's token is not cut off by the 12-hour lifetime of tokens without one");
+        now.addAndGet(24L * 60 * 60);
+        assertNull(jwt.read(token), "after the expiry it was given, the token is refused whatever the session row says");
+    }
+
+    @Test
+    void aTokenFromBeforeSessionsHasNone() {
+        assertNull(jwt.read(jwt.issue(7, 0)).sessionId());
     }
 }

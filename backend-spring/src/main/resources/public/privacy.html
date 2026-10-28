@@ -68,6 +68,16 @@
             <td>You, and the person who invited you if it was an invitation</td>
           </tr>
           <tr>
+            <td>Your sign-ins: one per device, with a short name for it such as "Chrome on Windows" (not the full browser description), when it started and when it was last used</td>
+            <td>To keep you signed in, and to let you see where you are signed in and sign any device out. Deleted when you sign out, set a new password or delete your account. A sign-in that ends by itself (after 12 hours, or 30 days without use if you chose "Stay signed in") stops working at once and is deleted soon after.</td>
+            <td>You alone</td>
+          </tr>
+          <tr>
+            <td>Notifications: for each device where you turned them on (possible only where you chose "Stay signed in"), the address your browser's push service gave it, and the keys that encrypt notifications for it</td>
+            <td>To tell you when someone mentions you. A notification holds who mentioned you and the start of the post, encrypted so that only your browser can read it. Deleted when you turn notifications off, sign that device out or delete your account, and when that device's sign-in ends: a device you are no longer signed in on receives nothing.</td>
+            <td>Nobody; your browser's push service delivers it without being able to read it</td>
+          </tr>
+          <tr>
             <td>Your network (IP) address</td>
             <td>To slow down someone guessing passwords or invitation links. Kept only in the running server's memory, never in the database, and forgotten when the server restarts.</td>
             <td>Nobody; see also "Services we use"</td>
@@ -86,12 +96,18 @@
         <li><strong>Resend</strong> (United States) delivers the emails Brief! sends: confirmations, password links and invitations. It tells Brief! when one cannot be delivered.</li>
         <li><strong>Cloudflare</strong> (United States) provides the domain name and forwards mail sent to support@briefmessage.net.</li>
       </ul>
+      <p>
+        If you turn on notifications, they travel through the push service of your browser's maker: Google for Chrome and for Edge on
+        Android, Mozilla for Firefox, Apple for Safari, Microsoft for Edge on Windows. Brief! chooses none of these; your browser does.
+        Each notification is encrypted for your browser alone, so the push service sees only that a notification for your device
+        arrived, and when.
+      </p>
       <p>Each keeps data only as long as its own service needs. We do not sell, rent or share your data with anyone else.</p>
 
       <h2>How long</h2>
       <p>
         Your account and posts are kept until you delete them. When you delete your account, it is removed from the database at once, together
-        with your posts, your email address, the invitation you joined with and any links mailed to you. If the hosting provider keeps backups of the database, deleted data
+        with your posts, your email address, the invitation you joined with, any links mailed to you, your sign-ins and your notification settings. If the hosting provider keeps backups of the database, deleted data
         leaves those backups when they expire, within days.
       </p>
 

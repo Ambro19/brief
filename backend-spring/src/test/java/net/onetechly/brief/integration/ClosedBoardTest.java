@@ -31,6 +31,8 @@ import static org.junit.jupiter.api.Assertions.*;
                 "brief.owner-username=TestUser1",
                 "brief.invite-code=",
                 "brief.mail.resend-api-key=",   // never real mail from a test, whatever the machine has set
+                "brief.push.vapid-public-key=",   // 2.8: notifications off, whatever the machine has set
+                "brief.push.vapid-private-key=",
                 "brief.client-ip.header=" + ClosedBoardTest.PROXY_HEADER,
                 "spring.datasource.url=${BRIEF_TEST_DB_URL:jdbc:h2:mem:brief-closed;DB_CLOSE_DELAY=-1}",
                 "spring.datasource.username=${BRIEF_TEST_DB_USER:sa}",

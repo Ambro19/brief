@@ -41,6 +41,28 @@ public class AuthGuard {
     }
 
     /**
+     * The session the caller's token belongs to (2.8), or null: nobody is signed in, or the token
+     * was issued by 2.7 or earlier, before sessions were kept. JwtAuthenticationFilter stored it.
+     */
+    public Integer currentSessionId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getPrincipal() instanceof Integer
+                && authentication.getDetails() instanceof Integer sessionId) {
+            return sessionId;
+        }
+        return null;
+    }
+
+    /** The signed-in caller's account id; 401 if nobody is signed in. Holds in every mode. */
+    public int requireSignedIn() {
+        Integer callerId = currentAccountId();
+        if (callerId == null) {
+            throw new UnauthorizedException();
+        }
+        return callerId;
+    }
+
+    /**
      * For what belongs to one account alone (its email address, its profile): the caller must
      * be signed in (else 401) and must be that account (else 403). Unlike requireWriteAs this
      * holds in every mode. The original contract has no such endpoints, so there is no

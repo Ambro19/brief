@@ -1,9 +1,11 @@
 /*
- * Brief! service worker (2.3; unchanged in 2.4).
+ * Brief! service worker (2.3; notifications since 2.8).
  *
  * A service worker is a small script the browser keeps running beside the page. It sees the
- * page's network requests and may answer them itself. This one does a single job: keep a copy
- * of the app's own files, so the installed app opens at once and still opens with no connection.
+ * page's network requests and may answer them itself. This one does two jobs: keep a copy of the
+ * app's own files, so the installed app opens at once and still opens with no connection; and
+ * (2.8) show the notifications the server sends when someone mentions the member, even when no
+ * Brief! tab is open. See "Notifications" at the end of this file.
  *
  * What it handles, and how:
  *
@@ -148,3 +150,72 @@ async function forgetAssetsNotNamedIn(html, cache) {
     if (path.startsWith("/assets/") && isCode && !html.includes(path)) await cache.delete(request);
   }
 }
+
+// ------------------------------------------------------------------ notifications (2.8)
+//
+// The server sends a small JSON document, encrypted for this browser (the browser decrypts it
+// before this code sees it):
+//
+//   {"title": "Gilberto mentioned you", "body": "Hey @Mayayo, ...", "url": "/#/mentions",
+//    "tag": "brief-mention", "message_id": 42}
+//
+// A newer notification with the same tag replaces the older one, so a burst of mentions leaves
+// one notification, not a pile. Browsers require that every push shows something: a push that
+// cannot be read still shows a plain "Brief!" notification.
+
+self.addEventListener("push", (event) => {
+  let content = {};
+  try {
+    content = event.data ? event.data.json() : {};
+  } catch {
+    content = {};
+  }
+  event.waitUntil(show(content));
+});
+
+/** Where a tap may lead: a page of this site, nothing else ("//other.site/" also starts with "/"). */
+function sameSitePath(value) {
+  try {
+    const url = new URL(value, self.location.origin);
+    return url.origin === self.location.origin ? url.pathname + url.search + url.hash : null;
+  } catch {
+    return null;
+  }
+}
+
+function show(content) {
+  const title = typeof content.title === "string" && content.title ? content.title : "Brief!";
+  const url = (typeof content.url === "string" && sameSitePath(content.url)) || "/#/mentions";
+  return self.registration.showNotification(title, {
+    body: typeof content.body === "string" ? content.body : "Someone mentioned you.",
+    tag: typeof content.tag === "string" ? content.tag : "brief-mention",
+    renotify: true, // a replacement still makes a sound or a buzz, as a new mention should
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    data: { url },
+  });
+}
+
+// A tap on the notification: bring an open Brief! window forward and show the mentions there, or
+// open a new one. Only addresses on this site are opened (the url is checked when it arrives).
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = new URL(sameSitePath(event.notification.data?.url ?? "") ?? "/#/mentions", self.location.origin).href;
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const client of windows) {
+        if (new URL(client.url).origin === self.location.origin && "focus" in client) {
+          await client.focus();
+          try {
+            if ("navigate" in client) await client.navigate(target);
+          } catch {
+            /* a window this worker does not control cannot be steered; it is in front, at least */
+          }
+          return;
+        }
+      }
+      await self.clients.openWindow(target);
+    })(),
+  );
+});

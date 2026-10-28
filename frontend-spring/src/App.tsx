@@ -8,9 +8,11 @@ import { InvitePanel } from "./components/InvitePanel";
 import type { OpenInvitation } from "./components/AuthPanel";
 import { InstallHint } from "./components/InstallHint";
 import { MessageItem } from "./components/MessageItem";
+import { NotificationsCard } from "./components/NotificationsCard";
+import { type PushState, forgetPushOnThisDevice, pushState } from "./lib/push";
 import { takeMailedLink } from "./lib/links";
 import { mentionsName } from "./lib/richText";
-import { loadSeenMentionId, loadSession, saveSeenMentionId, saveSession } from "./lib/session";
+import { SESSION_KEY, loadSeenMentionId, loadSession, replaceStoredToken, saveSeenMentionId, saveSession } from "./lib/session";
 import type { Message, MessagePage, Profile, PublicAccount, ServerInfo, Session } from "./types";
 
 /** Which list of posts is on screen. Kept in the URL hash so a view can be linked and reloaded. */
@@ -126,6 +128,43 @@ export default function App() {
   const [loadingOlderMentions, setLoadingOlderMentions] = useState(false);
   const [seenMentionId, setSeenMentionId] = useState(0);
   const [alertPermission, setAlertPermission] = useState<AlertPermission>(currentAlertPermission);
+  /**
+   * Notifications on this device (2.8), once known. While they are on, the service worker shows
+   * every mention, so the page does not show its own desktop alert as well.
+   */
+  const [pushHere, setPushHere] = useState<PushState | null>(null);
+  const pushOnHere = useRef(false);
+  const notePushState = useCallback((state: PushState) => {
+    setPushHere(state);
+    pushOnHere.current = state === "on";
+  }, []);
+
+  // Whether notifications are on here is known at once after signing in, not only once the Mentions
+  // page or Your account has been opened: until then the page would show its own desktop alert as
+  // well as the notification (independent review of 2.8.0).
+  const myPushToken = server?.push ? session?.token : undefined;
+  useEffect(() => {
+    if (!myPushToken) return;
+    let current = true;
+    void pushState(myPushToken).then((state) => current && notePushState(state));
+    return () => {
+      current = false;
+    };
+  }, [myPushToken, notePushState]);
+
+  // Another tab of this browser signed in again, or was given a new token by "Sign out everywhere
+  // else": use the same session here.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== SESSION_KEY || event.newValue === null) return;
+      const stored = loadSession();
+      setSession((current) =>
+        current && stored && stored.account_id === current.account_id && stored.token !== current.token ? stored : current,
+      );
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
   const toastTimer = useRef<number>();
   /** Highest mention id received so far; null until the first load, so old mentions never raise an alert. */
   const newestMentionId = useRef<number | null>(null);
@@ -176,7 +215,12 @@ export default function App() {
     serverKnown.current = info;
     // Keep the object already in use when nothing changed, so that nothing which depends on it starts over.
     setServer((known) =>
-      known !== null && known.passwordPolicy === info.passwordPolicy && known.email === info.email && known.board === info.board
+      known !== null &&
+      known.passwordPolicy === info.passwordPolicy &&
+      known.email === info.email &&
+      known.board === info.board &&
+      known.sessions === info.sessions &&
+      known.push === info.push
         ? known
         : info,
     );
@@ -277,7 +321,7 @@ export default function App() {
     const summary = arrived.length === 1 ? `${who} mentioned you` : `${arrived.length} new mentions`;
     notify(summary);
     // A desktop notification reaches people who are looking at another window.
-    if (document.hidden && currentAlertPermission() === "granted") {
+    if (document.hidden && currentAlertPermission() === "granted" && !pushOnHere.current) {
       new Notification("Brief!", {
         body: `${summary}: ${latest.message_text}`,
         tag: "brief-mention",
@@ -557,9 +601,26 @@ export default function App() {
   }
 
   function endSession(message: string) {
+    // "Sign out everywhere else" in another tab of this browser gave this session a new token there.
+    // This tab's old token is then refused: take the new one instead of signing out (and of wiping
+    // the other tab's sign-in and this device's notifications; independent review of 2.8.0).
+    const stored = loadSession();
+    if (session && stored && stored.account_id === session.account_id && stored.token !== session.token) {
+      setSession(stored);
+      return;
+    }
     setSession(null);
     saveSession(null);
+    // 2.8: the next person to sign in on this device must not inherit its notifications.
+    void forgetPushOnThisDevice();
+    notePushState("off");
     notify(message);
+  }
+
+  /** "Sign out everywhere else" gave this device a new token for the same session (2.8). */
+  function tokenRenewed(token: string) {
+    setSession((current) => (current ? { ...current, token } : current));
+    replaceStoredToken(token);
   }
 
   async function signOut() {
@@ -806,6 +867,9 @@ export default function App() {
               endSession("Your account and your posts were deleted.");
             }}
             onSessionEnded={() => endSession("Your session ended. Sign in again.")}
+            server={server}
+            onTokenRenewed={tokenRenewed}
+            onPushChange={notePushState}
           />
         ) : (
           <>
@@ -827,7 +891,19 @@ export default function App() {
               <p className="signin-nudge">Reading is open to everyone. Sign in to post.</p>
             )}
 
-            {showingMentions && alertPermission !== "unsupported" && (
+            {/* 2.8: notifications that arrive with Brief! closed, where the server and the browser offer them. */}
+            {showingMentions && session && server?.push && (
+              <NotificationsCard
+                key={session.token}
+                session={session}
+                variant="prompt"
+                onChange={notePushState}
+                onSessionEnded={() => endSession("Your session ended. Sign in again.")}
+              />
+            )}
+
+            {/* Otherwise the alerts of 2.2, which work while Brief! is open in a tab. */}
+            {showingMentions && alertPermission !== "unsupported" && (!server?.push || pushHere === "unsupported") && (
               <p className="alerts">
                 {alertPermission === "granted" ? (
                   "Desktop alerts are on. You'll be told about new mentions while Brief! is open in a tab."

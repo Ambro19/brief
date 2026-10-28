@@ -11,6 +11,7 @@ import net.onetechly.brief.repository.MentionRepository;
 import net.onetechly.brief.repository.MessageRepository;
 import net.onetechly.brief.service.MentionService;
 import net.onetechly.brief.service.MessageService;
+import net.onetechly.brief.service.MentionAlerts;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -44,7 +45,7 @@ class MessageServiceTest {
         mentions = mock(MentionRepository.class);
         // A real MentionService on top of the mocks: the tests below can then see what the
         // message service makes it write.
-        service = new MessageService(messages, accounts, new MentionService(accounts, messages, mentions));
+        service = new MessageService(messages, accounts, new MentionService(accounts, messages, mentions), MentionAlerts.NONE);
     }
 
     private static Message stored(int id, int postedBy, String text, long epoch) {
@@ -242,5 +243,25 @@ class MessageServiceTest {
         assertThrows(BadRequestException.class, () -> service.getPage(null, MessageService.MAX_PAGE_SIZE + 1, null));
         assertThrows(BadRequestException.class, () -> service.getPage(null, 10, 0));
         assertEquals(List.of(), service.getPage(null, MessageService.MAX_PAGE_SIZE, null).items()); // the largest allowed size is fine
+    }
+
+    // ---- alerts for mentions (2.8) ----
+
+    @Test
+    void theMembersAPostNewlyMentionsAreAlertedOnCreateAndOnEdit() {
+        MentionService index = mock(MentionService.class);
+        java.util.List<String> alerts = new java.util.ArrayList<>();
+        MessageService watched = new MessageService(messages, accounts, index,
+                (message, ids) -> alerts.add(message.getMessageText() + " -> " + new java.util.TreeSet<>(ids)));
+        when(accounts.existsById(1)).thenReturn(true);
+        when(messages.findById(1)).thenReturn(Optional.of(stored(1, 1, "hi Gilberto", 1L)));
+        savingReturnsTheMessage();
+        when(index.index(any(Message.class))).thenReturn(new java.util.HashSet<>(java.util.Set.of(2)), new java.util.HashSet<>());
+
+        watched.create(new MessageRequest(1, "hi Gilberto", 1L));
+        watched.updateText(1, "hi Gilberto!");
+
+        assertEquals(java.util.List.of("hi Gilberto -> [2]", "hi Gilberto! -> []"), alerts,
+                "the edit names nobody new; PushNotifications sends nothing for an empty set");
     }
 }

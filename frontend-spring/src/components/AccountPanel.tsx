@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { ApiError, NetworkError, api } from "../api";
-import type { Profile, Session } from "../types";
+import type { PushState } from "../lib/push";
+import type { Profile, ServerInfo, Session } from "../types";
+import { NotificationsCard } from "./NotificationsCard";
+import { SessionsCard } from "./SessionsCard";
 
 interface Props {
   session: Session;
@@ -10,15 +13,22 @@ interface Props {
   onDeleted: () => void;
   /** The session ended (401) while the page was open: the app signs out and asks for a new sign-in. */
   onSessionEnded: () => void;
+  /** What the server can do (2.8: sessions and notifications); null while it has not said. */
+  server: ServerInfo | null;
+  /** "Sign out everywhere else" issued this device a new token (2.8). */
+  onTokenRenewed: (token: string) => void;
+  /** Notifications on this device were turned on or off (2.8). */
+  onPushChange: (state: PushState) => void;
 }
 
 /**
- * "Your account" (2.5): what Brief! holds about the member, and the way to delete it.
+ * "Your account" (2.5): what Brief! holds about the member, and the way to delete it. Since 2.8
+ * also notifications on this device, and where the member is signed in.
  *
  * Deleting asks for the password again, and for a tick that says what will happen, because it
  * cannot be undone: the account and every post it wrote are gone.
  */
-export function AccountPanel({ session, profile, onDeleted, onSessionEnded }: Props) {
+export function AccountPanel({ session, profile, onDeleted, onSessionEnded, server, onTokenRenewed, onPushChange }: Props) {
   const [password, setPassword] = useState("");
   const [understood, setUnderstood] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -50,6 +60,9 @@ export function AccountPanel({ session, profile, onDeleted, onSessionEnded }: Pr
 
   return (
     <section className="account-panel" aria-label="Your account">
+      {server?.push && <NotificationsCard session={session} variant="card" onChange={onPushChange} onSessionEnded={onSessionEnded} />}
+      {server?.sessions && <SessionsCard session={session} onTokenRenewed={onTokenRenewed} onSessionEnded={onSessionEnded} />}
+
       <div className="card">
         <h2 className="card-title">What Brief! keeps about you</h2>
         <dl className="facts">
@@ -68,6 +81,18 @@ export function AccountPanel({ session, profile, onDeleted, onSessionEnded }: Pr
           <dd>Stored as a salted hash; nobody can read it, not even the person who runs Brief!.</dd>
           <dt>Posts</dt>
           <dd>Everything you posted, until you delete it or the account.</dd>
+          {server?.sessions && (
+            <>
+              <dt>Sign-ins</dt>
+              <dd>One per device: a name such as "Chrome on Windows", and when it was last used. Gone when you sign out.</dd>
+            </>
+          )}
+          {server?.push && (
+            <>
+              <dt>Notifications</dt>
+              <dd>For each device where you turned them on, the address of your browser's push service. Gone when you turn them off.</dd>
+            </>
+          )}
         </dl>
         <p className="field-note">
           More in the{" "}

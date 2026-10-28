@@ -126,7 +126,8 @@ public class MentionService {
 
     /**
      * Brings the mention rows of one message in line with its text. Call it after a message
-     * is created or edited.
+     * is created or edited. Returns the members who are mentioned now and were not before (2.8:
+     * they are the ones to alert).
      *
      * It changes only what differs: rows that are still right are left alone, rows that are
      * no longer right are deleted, missing rows are added. (Deleting everything and inserting
@@ -134,7 +135,7 @@ public class MentionService {
      * transaction Hibernate sends inserts to the database before deletes.)
      */
     @Transactional
-    public void index(Message message) {
+    public Set<Integer> index(Message message) {
         Set<Integer> wanted = mentionedAccountIds(message);
 
         List<Mention> stale = new ArrayList<>();
@@ -151,6 +152,7 @@ public class MentionService {
             missing.add(new Mention(message.getMessageId(), accountId));
         }
         mentions.saveAll(missing);
+        return wanted; // what is left of it after the loop above: the members newly mentioned
     }
 
     /** Forgets the mentions of a message. Call it when the message is deleted. */

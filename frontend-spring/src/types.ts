@@ -50,11 +50,37 @@ export type PasswordPolicy = "basic" | "strong";
  *                       no "Forgot password?", and the account endpoints of 2.4 are never called.
  *   board   "closed":   creating an account needs an invitation code and reading needs a sign-in.
  *           "open":     anyone may read and join (also the answer for older servers).
+ *   sessions true (2.8): sessions are kept on the server. "Stay signed in" lasts 30 days, and Your
+ *           account lists where the member is signed in. False on older servers.
+ *   push    true (2.8): members can turn on notifications for mentions. False when the server has
+ *           no VAPID keys, and on older servers.
  */
 export interface ServerInfo {
   passwordPolicy: PasswordPolicy;
   email: "required" | "optional" | "none";
   board: "open" | "closed";
+  sessions: boolean;
+  push: boolean;
+}
+
+/** One place where the member is signed in (GET /sessions, 2.8). Times are seconds since 1970. */
+export interface SignedInSession {
+  session_id: number;
+  /** For example "Chrome on Windows". */
+  device: string;
+  /** "Stay signed in" was ticked: 30 days from the last use. */
+  stay: boolean;
+  created_at: number;
+  last_used_at: number;
+  expires_at: number;
+  /** The session this page is signed in with. */
+  current: boolean;
+}
+
+/** A browser's push subscription as PushSubscription.toJSON() gives it, and the server takes it. */
+export interface PushSubscriptionJson {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
 }
 
 /** What a member may see of their own account (GET /me, 2.4). */

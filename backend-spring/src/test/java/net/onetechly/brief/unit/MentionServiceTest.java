@@ -273,6 +273,16 @@ class MentionServiceTest {
     }
 
     @Test
+    void indexingReportsOnlyTheMembersWhoAreNewlyMentioned() {
+        // 2.8: these are the members who get a notification. An edit that keeps a name alerts nobody again.
+        assertEquals(java.util.Set.of(1, 2), service.index(message(5, 4, "TestUser1 and TestUser2: standup in 5")));
+        assertEquals(java.util.Set.of(3), service.index(message(5, 4, "TestUser2 and TestUser10: moved to 3pm")));
+        assertEquals(java.util.Set.of(), service.index(message(5, 4, "TestUser2 and TestUser10: moved to 3:30pm")));
+        assertEquals(java.util.Set.of(1), service.index(message(5, 4, "TestUser1, TestUser2 and TestUser10")),
+                "TestUser1 was dropped by an edit and named again: mentioned anew");
+    }
+
+    @Test
     void savingTheSameTextAgainChangesNothing() {
         service.index(message(5, 2, "ping TestUser1"));
         service.index(message(5, 2, "ping TestUser1"));

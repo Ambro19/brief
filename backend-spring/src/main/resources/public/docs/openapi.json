@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Brief! API",
-    "version": "2.7.1",
-    "description": "Backend for **Brief!**, a message board where every post fits in 255 characters.\n\nThe same API is served by two editions of the backend: **Javalin + JDBC** (`backend/`) and **Spring Boot + Spring Security + Spring Data JPA** (`backend-spring/`).\n\n**How errors work:** error responses have an empty body. The status code carries the meaning.\n\n**How to try the protected endpoints here:**\n1. Run `POST /register` to create an account (or use one you already have).\n2. Run `POST /login`. In the response headers, copy the value of `x-auth-token`.\n3. Click **Authorize** at the top right, paste the token, and confirm.\n4. Now `POST`, `PATCH` and `DELETE` on `/messages` will work, as that account.\n\nThe app runs in *strict* mode by default: you can only post as yourself and only change your own posts. Set the environment variable `BRIEF_AUTH_MODE=compat` before starting to get the original training contract, where no token is needed.\n\n**New in 2.1 (Spring Boot edition only):** the login token is a signed JWT; `GET /messages` and `GET /accounts/{account_id}/messages` can be read a page at a time with `limit` and `before`; in strict mode new passwords must be strong and repeated failed logins answer `429`. The Javalin edition ignores the paging parameters and always returns the full list.\n\n**New in 2.2 (Spring Boot edition only):** mentions are stored in their own indexed table when a post is saved or edited, so `GET /accounts/{account_id}/mentions` is a look-up and no longer searches every post.\n\n**New in 2.3 (Spring Boot edition only):** `GET /accounts/{account_id}/mentions` can be read a page at a time with `limit` and `before`, like the other lists; a username is one name whatever its capitals, for registering and for signing in; in strict mode a new username must be 3 to 30 letters, digits, dots, dashes or underscores. The database schema is created by versioned Flyway migrations, and the application runs on PostgreSQL as well as H2.\n\n**New in 2.4 (Spring Boot edition only):** an account has an email address. In strict mode a new account must give one, and can read but not post until the link mailed to it has been opened (`POST /email/verify`). A forgotten password is replaced through a mailed link (`POST /password/forgot`, `POST /password/reset`). An address is shown only to its own account (`GET /me`). A board can be **closed** (`BRIEF_BOARD=closed`; in 2.4 `BRIEF_INVITE_CODE`): creating an account then needs an invitation, and every `GET` of posts and members needs a login token. `GET /health` reports `email` and `board`, so a client knows which of this applies.\n\n**New in 2.5 (Spring Boot edition only):** newcomers to a closed board join through **invitation links** that the board owner (`BRIEF_OWNER_USERNAME`) mails (`POST /invitations`) or passes on (`POST /invitations/link`). The link opens the web app at `/?invite=<secret>`; `POST /invitations/lookup` tells who sent it, and `POST /register` with `\"invitation\"` uses it. A mailed invitation creates the account with its address already confirmed. The shared code of 2.4 is no longer asked for. A member can delete their account and posts (`POST /accounts/{account_id}/deletion`). `GET /me` reports `is_owner`.\n\n**New in 2.6:** no change to the API. The web app gains a Help Center (`/help/index.html`): plain pages about what Brief! is, getting started, pricing, an FAQ and the refund policy, public on a closed board like the Terms and Privacy pages.\n\n**New in 2.7 (Spring Boot edition only):** Brief! learns when a mail could not be delivered. Resend reports bounces and suppressed sends to `POST /webhooks/resend`, signed with `BRIEF_RESEND_WEBHOOK_SECRET`. `GET /me` reports `email_bounced`; for a day after a bounce the address is not mailed, and the requests that would mail it answer `422`. The owner's list of invitations shows `bounced` and `taken`. Confirmation and password links are used up in one database statement, so a link works once even when it is opened twice at the same moment."
+    "version": "2.8.0",
+    "description": "Backend for **Brief!**, a message board where every post fits in 255 characters.\n\nThe same API is served by two editions of the backend: **Javalin + JDBC** (`backend/`) and **Spring Boot + Spring Security + Spring Data JPA** (`backend-spring/`).\n\n**How errors work:** error responses have an empty body. The status code carries the meaning.\n\n**How to try the protected endpoints here:**\n1. Run `POST /register` to create an account (or use one you already have).\n2. Run `POST /login`. In the response headers, copy the value of `x-auth-token`.\n3. Click **Authorize** at the top right, paste the token, and confirm.\n4. Now `POST`, `PATCH` and `DELETE` on `/messages` will work, as that account.\n\nThe app runs in *strict* mode by default: you can only post as yourself and only change your own posts. Set the environment variable `BRIEF_AUTH_MODE=compat` before starting to get the original training contract, where no token is needed.\n\n**New in 2.1 (Spring Boot edition only):** the login token is a signed JWT; `GET /messages` and `GET /accounts/{account_id}/messages` can be read a page at a time with `limit` and `before`; in strict mode new passwords must be strong and repeated failed logins answer `429`. The Javalin edition ignores the paging parameters and always returns the full list.\n\n**New in 2.2 (Spring Boot edition only):** mentions are stored in their own indexed table when a post is saved or edited, so `GET /accounts/{account_id}/mentions` is a look-up and no longer searches every post.\n\n**New in 2.3 (Spring Boot edition only):** `GET /accounts/{account_id}/mentions` can be read a page at a time with `limit` and `before`, like the other lists; a username is one name whatever its capitals, for registering and for signing in; in strict mode a new username must be 3 to 30 letters, digits, dots, dashes or underscores. The database schema is created by versioned Flyway migrations, and the application runs on PostgreSQL as well as H2.\n\n**New in 2.4 (Spring Boot edition only):** an account has an email address. In strict mode a new account must give one, and can read but not post until the link mailed to it has been opened (`POST /email/verify`). A forgotten password is replaced through a mailed link (`POST /password/forgot`, `POST /password/reset`). An address is shown only to its own account (`GET /me`). A board can be **closed** (`BRIEF_BOARD=closed`; in 2.4 `BRIEF_INVITE_CODE`): creating an account then needs an invitation, and every `GET` of posts and members needs a login token. `GET /health` reports `email` and `board`, so a client knows which of this applies.\n\n**New in 2.5 (Spring Boot edition only):** newcomers to a closed board join through **invitation links** that the board owner (`BRIEF_OWNER_USERNAME`) mails (`POST /invitations`) or passes on (`POST /invitations/link`). The link opens the web app at `/?invite=<secret>`; `POST /invitations/lookup` tells who sent it, and `POST /register` with `\"invitation\"` uses it. A mailed invitation creates the account with its address already confirmed. The shared code of 2.4 is no longer asked for. A member can delete their account and posts (`POST /accounts/{account_id}/deletion`). `GET /me` reports `is_owner`.\n\n**New in 2.6:** no change to the API. The web app gains a Help Center (`/help/index.html`): plain pages about what Brief! is, getting started, pricing, an FAQ and the refund policy, public on a closed board like the Terms and Privacy pages.\n\n**New in 2.7 (Spring Boot edition only):** Brief! learns when a mail could not be delivered. Resend reports bounces and suppressed sends to `POST /webhooks/resend`, signed with `BRIEF_RESEND_WEBHOOK_SECRET`. `GET /me` reports `email_bounced`; for a day after a bounce the address is not mailed, and the requests that would mail it answer `422`. The owner's list of invitations shows `bounced` and `taken`. Confirmation and password links are used up in one database statement, so a link works once even when it is opened twice at the same moment.\n\n**New in 2.8 (Spring Boot edition only):** sessions are kept in the database. `POST /login` takes an optional `\"stay\": true` (\"Stay signed in on this device\"): the session then lasts 30 days from its last use, at most a year; without it, 12 hours. Signing out ends a session for good, also across restarts. `GET /sessions` lists where a member is signed in; `DELETE /sessions/{session_id}` and `POST /sessions/sign-out-others` end sessions. **Notifications:** with `BRIEF_VAPID_PUBLIC_KEY` and `BRIEF_VAPID_PRIVATE_KEY` set, a member's browser can subscribe (`POST /push/subscription`, with the server key from `GET /push/key`), and receives an encrypted Web Push notification (RFC 8030, 8291, 8292) when a post newly mentions them. `GET /health` reports `sessions` and `push`."
   },
   "servers": [
     {
@@ -35,6 +35,14 @@
     {
       "name": "webhooks",
       "description": "Calls from other services (2.7)."
+    },
+    {
+      "name": "sessions",
+      "description": "Where a member is signed in (2.8)."
+    },
+    {
+      "name": "notifications",
+      "description": "Notifications for mentions, by Web Push (2.8)."
     }
   ],
   "paths": {
@@ -167,7 +175,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "Ends the session for the token sent. Always answers 200, even if the token is already gone (idempotent).",
+        "description": "Ends the session for the token sent. Since 2.8 the session is deleted from the database, so the token is refused from then on, also after a restart, and the device's notifications stop. Always answers 200, even if the token is already gone (idempotent).",
         "responses": {
           "200": {
             "description": "Signed out. Empty body."
@@ -1224,6 +1232,19 @@
                         "open",
                         "closed"
                       ]
+                    },
+                    "sessions": {
+                      "type": "string",
+                      "enum": [
+                        "kept"
+                      ]
+                    },
+                    "push": {
+                      "type": "string",
+                      "enum": [
+                        "on",
+                        "off"
+                      ]
                     }
                   }
                 },
@@ -1231,13 +1252,15 @@
                   "status": "UP",
                   "password_policy": "strong",
                   "email": "required",
-                  "board": "open"
+                  "board": "open",
+                  "sessions": "kept",
+                  "push": "on"
                 }
               }
             }
           }
         },
-        "description": "`password_policy` is sent by the Spring Boot edition: `strong` in strict mode, `basic` in compat mode. Since 2.4 it also sends `email` (`required` in strict mode, `optional` in compat mode) and `board` (`closed` or `open`, from `BRIEF_BOARD`). The Javalin edition sends only `status`. This endpoint is public on a closed board too."
+        "description": "`password_policy` is sent by the Spring Boot edition: `strong` in strict mode, `basic` in compat mode. Since 2.4 it also sends `email` (`required` in strict mode, `optional` in compat mode) and `board` (`closed` or `open`, from `BRIEF_BOARD`). The Javalin edition sends only `status`. This endpoint is public on a closed board too. Since 2.8 also `sessions` (`kept`: sessions live in the database) and `push` (`on` when notifications can be turned on)."
       }
     },
     "/webhooks/resend": {
@@ -1308,6 +1331,325 @@
           }
         }
       }
+    },
+    "/sessions": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Where you are signed in",
+        "operationId": "listSessions",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "2.8. The caller's sessions that have not ended, newest first. `current` marks the one this request was made with (none for a token issued before 2.8).",
+        "responses": {
+          "200": {
+            "description": "The sessions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Session"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token."
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}": {
+      "delete": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Sign one device out",
+        "operationId": "endSession",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "description": "2.8. Ends one of the caller's sessions, and with it that device's notifications.",
+        "responses": {
+          "200": {
+            "description": "Ended. Empty body."
+          },
+          "401": {
+            "description": "No valid token."
+          },
+          "404": {
+            "description": "No such session, or someone else's (the same answer)."
+          }
+        }
+      }
+    },
+    "/sessions/sign-out-others": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Sign out everywhere else",
+        "operationId": "signOutOthers",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "2.8. Ends every session of the caller except this one, and every token from before 2.8. This session's token is replaced too: the answer carries a new one in `x-auth-token`, for the same session; use it from now on.",
+        "responses": {
+          "200": {
+            "description": "How many sessions ended.",
+            "headers": {
+              "x-auth-token": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The new token for this session."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ended": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token."
+          },
+          "409": {
+            "description": "The token is from before 2.8 and belongs to no session: sign in again first."
+          }
+        }
+      }
+    },
+    "/push/key": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "The server key for notifications",
+        "operationId": "pushKey",
+        "description": "2.8. Brief!'s VAPID public key (RFC 8292), the `applicationServerKey` for `PushManager.subscribe`. Public, also on a closed board.",
+        "responses": {
+          "200": {
+            "description": "The key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "public_key": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Notifications are off on this server (no VAPID keys)."
+          }
+        }
+      }
+    },
+    "/push/subscription": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Turn on notifications for this device",
+        "operationId": "pushSubscribe",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "2.8. Stores the browser's subscription with the caller's current session. From then on a post that newly mentions the caller sends an encrypted notification to it. Signing that session out deletes it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushSubscription"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "on": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The endpoint is not at a known push service, or the keys are not a P-256 key and a 16-byte secret."
+          },
+          "409": {
+            "description": "The token is from before 2.8 and belongs to no session: sign in again first."
+          },
+          "401": {
+            "description": "No valid token."
+          },
+          "404": {
+            "description": "Notifications are off on this server."
+          }
+        }
+      }
+    },
+    "/push/subscription/check": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Are notifications on for this device?",
+        "operationId": "pushCheck",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushEndpoint"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`on` is true if this endpoint is stored for the caller's current session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "on": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token."
+          }
+        }
+      }
+    },
+    "/push/subscription/deletion": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Turn off notifications for this device",
+        "operationId": "pushUnsubscribe",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushEndpoint"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Forgotten, if it was the caller's. Empty body."
+          },
+          "401": {
+            "description": "No valid token."
+          }
+        }
+      }
+    },
+    "/push/test": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Send a test notification",
+        "operationId": "pushTest",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "2.8. Sends a test notification to the devices of the caller's current session.",
+        "responses": {
+          "200": {
+            "description": "How many were sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sent": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The token belongs to no session."
+          },
+          "429": {
+            "description": "A test was sent less than a minute ago. See Retry-After."
+          },
+          "401": {
+            "description": "No valid token."
+          },
+          "404": {
+            "description": "Notifications are off on this server."
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1335,6 +1677,10 @@
             "type": "string",
             "minLength": 4,
             "description": "At least 4 characters; in the Spring Boot edition in strict mode at least 8 with a letter and a digit."
+          },
+          "stay": {
+            "type": "boolean",
+            "description": "2.8, optional, `POST /login` only: true for a session that lasts 30 days from its last use (\"Stay signed in on this device\"); absent or false, 12 hours."
           }
         }
       },
@@ -1594,6 +1940,83 @@
         "properties": {
           "password": {
             "type": "string"
+          }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "integer"
+          },
+          "device": {
+            "type": "string",
+            "example": "Chrome on Windows"
+          },
+          "stay": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds since 1970."
+          },
+          "last_used_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "expires_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the session ends unless it is used again (for a stay session)."
+          },
+          "current": {
+            "type": "boolean",
+            "description": "The session this request was made with."
+          }
+        }
+      },
+      "PushSubscription": {
+        "type": "object",
+        "required": [
+          "endpoint",
+          "keys"
+        ],
+        "description": "What the browser's `PushSubscription.toJSON()` gives. `expirationTime` and other fields are ignored.",
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "https, at a browser maker's push service (Google, Mozilla, Apple, Microsoft); anything else is refused (400)."
+          },
+          "keys": {
+            "type": "object",
+            "required": [
+              "p256dh",
+              "auth"
+            ],
+            "properties": {
+              "p256dh": {
+                "type": "string",
+                "description": "The browser's P-256 public key, base64url."
+              },
+              "auth": {
+                "type": "string",
+                "description": "16 bytes, base64url."
+              }
+            }
+          }
+        }
+      },
+      "PushEndpoint": {
+        "type": "object",
+        "required": [
+          "endpoint"
+        ],
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "maxLength": 1000
           }
         }
       }
